@@ -57,7 +57,6 @@ import {
   Download,
   Trash2,
   ExternalLink,
-  Link,
   Save,
   Eye,
   FileText,
@@ -1610,61 +1609,7 @@ ${hasMermaid ? MERMAID_SCRIPT : ""}
             </Tooltip>
           </div>
 
-          <Dialog
-            open={showUrlInput}
-            onOpenChange={(open: boolean) => {
-              setShowUrlInput(open);
-              if (!open) setUrlInput("");
-            }}
-          >
-            <DialogTrigger asChild>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="sm">
-                    <Link className="size-3.5" />
-                    Import
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Import from URL ({modKey}+K)</TooltipContent>
-              </Tooltip>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle>Import from URL</DialogTitle>
-                <DialogDescription>
-                  Paste a GitHub file URL, Gist, or raw markdown URL.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="flex flex-col gap-3">
-                <Input
-                  value={urlInput}
-                  onChange={(e) => setUrlInput(e.target.value)}
-                  placeholder="https://github.com/user/repo/blob/main/README.md"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      fetchUrl();
-                    }
-                  }}
-                  autoFocus
-                />
-                <div className="flex justify-end gap-2">
-                  <DialogClose asChild>
-                    <Button variant="ghost" size="sm">
-                      Cancel
-                    </Button>
-                  </DialogClose>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={fetchUrl}
-                    disabled={urlLoading}
-                  >
-                    {urlLoading ? "Loading..." : "Fetch"}
-                  </Button>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
+
           <div className="flex-1" />
 
           <span className="text-xs text-muted-foreground">
@@ -1874,12 +1819,8 @@ ${hasMermaid ? MERMAID_SCRIPT : ""}
                   {modKey}+3
                 </kbd>
               </div>
-              <div className="flex items-center justify-between text-sm">
-                <span>Toggle URL import</span>
-                <kbd className="rounded bg-muted px-2 py-1 font-mono text-xs">
-                  {modKey}+K
-                </kbd>
-              </div>
+
+
             </div>
             <DialogClose asChild>
               <Button variant="outline" className="mt-2">
