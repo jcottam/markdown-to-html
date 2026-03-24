@@ -7,6 +7,7 @@ import { createHighlighter, type Highlighter } from "shiki";
 import { toast } from "sonner";
 import mermaid from "mermaid";
 import katex from "katex";
+// html2pdf will be dynamically imported on client-side only
 import {
   Dialog,
   DialogClose,
@@ -16,8 +17,21 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Sheet,
   SheetContent,
@@ -61,8 +75,13 @@ import {
   ArrowUpDown,
   Share2,
   Check,
+  Columns,
+  Edit,
+  Lock,
+  FileDown,
 } from "lucide-react";
-import { compressToEncodedURIComponent, decompressFromEncodedURIComponent } from "lz-string";
+import { THEMES, SHIKI_EXPORT_CSS, KATEX_CSS, MERMAID_SCRIPT, PDF_PRINT_CSS } from "@/lib/themes";
+import { createShareLink, decodeShareLink, type TTLOption } from "@/lib/share-utils";
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -78,6 +97,8 @@ interface TocItem {
   text: string;
   level: number;
 }
+
+type PaneLayout = "split" | "editor-only" | "preview-only";
 
 const SHIKI_LANGS = [
   "javascript",
@@ -107,91 +128,6 @@ const SHIKI_LANGS = [
   "astro",
   "text",
 ];
-
-const GITHUB_THEME = {
-  light: `
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 16px; line-height: 1.5; color: #24292f; background: #fff; }
-.markdown-body { max-width: 980px; margin: 0 auto; padding: 45px; }
-@media (max-width: 767px) { .markdown-body { padding: 15px; } }
-.markdown-body h1, .markdown-body h2 { padding-bottom: 0.3em; border-bottom: 1px solid #d0d7de; }
-.markdown-body h1 { font-size: 2em; margin: 24px 0 16px; font-weight: 600; }
-.markdown-body h2 { font-size: 1.5em; margin: 24px 0 16px; font-weight: 600; }
-.markdown-body h3 { font-size: 1.25em; margin: 24px 0 16px; font-weight: 600; }
-.markdown-body p { margin: 0 0 16px; }
-.markdown-body ul, .markdown-body ol { margin: 0 0 16px; padding-left: 2em; }
-.markdown-body li { margin-top: 0.25em; }
-.markdown-body table { border-spacing: 0; border-collapse: collapse; width: 100%; margin: 0 0 16px; }
-.markdown-body table th { font-weight: 600; padding: 6px 13px; border: 1px solid #d0d7de; background: #f6f8fa; }
-.markdown-body table td { padding: 6px 13px; border: 1px solid #d0d7de; }
-.markdown-body code { padding: 0.2em 0.4em; font-size: 85%; background: rgba(175,184,193,0.2); border-radius: 6px; font-family: ui-monospace, SFMono-Regular, monospace; }
-.markdown-body pre { padding: 16px; overflow: auto; font-size: 85%; line-height: 1.45; background: #f6f8fa; border-radius: 6px; margin: 0 0 16px; }
-.markdown-body pre code { padding: 0; background: transparent; display: block; }
-.markdown-body blockquote { padding: 0 1em; color: #57606a; border-left: 0.25em solid #d0d7de; margin: 0 0 16px; }
-.markdown-body a { color: #0969da; text-decoration: none; }
-.markdown-body strong { font-weight: 600; }
-.markdown-body hr { height: 0.25em; margin: 24px 0; background: #d0d7de; border: 0; }
-.markdown-body img { max-width: 100%; }
-.markdown-body ul:has(> li > input[type="checkbox"]) { list-style: none; padding-left: 0; }
-.markdown-body li:has(> input[type="checkbox"]) { display: flex; align-items: baseline; gap: 0.5em; }
-.markdown-body li > input[type="checkbox"] { margin-top: 0.125em; flex-shrink: 0; }
-@media print {
-  body { background: #fff !important; }
-  .markdown-body { max-width: 100%; padding: 0; }
-  @page { margin: 2cm; }
-}
-`,
-  dark: `
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 16px; line-height: 1.5; color: #e6edf3; background: #0d1117; }
-.markdown-body { max-width: 980px; margin: 0 auto; padding: 45px; }
-@media (max-width: 767px) { .markdown-body { padding: 15px; } }
-.markdown-body h1, .markdown-body h2 { padding-bottom: 0.3em; border-bottom: 1px solid #30363d; }
-.markdown-body h1 { font-size: 2em; margin: 24px 0 16px; font-weight: 600; }
-.markdown-body h2 { font-size: 1.5em; margin: 24px 0 16px; font-weight: 600; }
-.markdown-body h3 { font-size: 1.25em; margin: 24px 0 16px; font-weight: 600; }
-.markdown-body p { margin: 0 0 16px; }
-.markdown-body ul, .markdown-body ol { margin: 0 0 16px; padding-left: 2em; }
-.markdown-body li { margin-top: 0.25em; }
-.markdown-body table { border-spacing: 0; border-collapse: collapse; width: 100%; margin: 0 0 16px; }
-.markdown-body table th { font-weight: 600; padding: 6px 13px; border: 1px solid #30363d; background: #161b22; }
-.markdown-body table td { padding: 6px 13px; border: 1px solid #30363d; }
-.markdown-body code { padding: 0.2em 0.4em; font-size: 85%; background: rgba(110,118,129,0.4); border-radius: 6px; font-family: ui-monospace, SFMono-Regular, monospace; }
-.markdown-body pre { padding: 16px; overflow: auto; font-size: 85%; line-height: 1.45; background: #1c2333; border-radius: 6px; margin: 0 0 16px; border: 1px solid #30363d; }
-.markdown-body pre code { padding: 0; background: transparent; display: block; }
-.markdown-body blockquote { padding: 0 1em; color: #8b949e; border-left: 0.25em solid #30363d; margin: 0 0 16px; }
-.markdown-body a { color: #58a6ff; text-decoration: none; }
-.markdown-body strong { font-weight: 600; }
-.markdown-body hr { height: 0.25em; margin: 24px 0; background: #30363d; border: 0; }
-.markdown-body img { max-width: 100%; }
-.markdown-body ul:has(> li > input[type="checkbox"]) { list-style: none; padding-left: 0; }
-.markdown-body li:has(> input[type="checkbox"]) { display: flex; align-items: baseline; gap: 0.5em; }
-.markdown-body li > input[type="checkbox"] { margin-top: 0.125em; flex-shrink: 0; }
-@media print {
-  body { background: #fff !important; color: #24292f !important; }
-  .markdown-body { max-width: 100%; padding: 0; color: #24292f !important; }
-  .markdown-body * { color: #24292f !important; }
-  @page { margin: 2cm; }
-}
-`,
-};
-
-const SHIKI_EXPORT_CSS = `
-.shiki { padding: 16px; overflow: auto; font-size: 85%; line-height: 1.45; border-radius: 6px; margin: 0 0 16px; border: 1px solid; }
-.shiki code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace; }
-.shiki, .shiki span { color: var(--shiki-light); background: var(--shiki-light-bg); border-color: #d0d7de; }
-@media (prefers-color-scheme: dark) {
-  .shiki, .shiki span { color: var(--shiki-dark); background: var(--shiki-dark-bg); border-color: #30363d; }
-}
-@media print {
-  .shiki, .shiki span { color: var(--shiki-light) !important; background: var(--shiki-light-bg) !important; }
-}
-`;
-
-const KATEX_CSS = `<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.40/dist/katex.min.css" integrity="sha384-vKruj+a13U8yHIkAyGgK1J3ArTLzrFGBbBc0tDp4ad/EyewESeXE/Iv67Aj8gKZ0" crossorigin="anonymous">`;
-
-const MERMAID_SCRIPT = `<script type="module">
-import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
-</script>`;
 
 function toRawUrl(url: string): string {
   const ghBlob = url.match(/github\.com\/([^/]+)\/([^/]+)\/blob\/(.+)/);
@@ -305,6 +241,19 @@ export default function MarkdownConverter() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [scrollSync, setScrollSync] = useState(true);
   const [shareSuccess, setShareSuccess] = useState(false);
+  
+  // Feature 2: Themes
+  const [selectedTheme, setSelectedTheme] = useState("github");
+  
+  // Feature 3: Pane layouts
+  const [paneLayout, setPaneLayout] = useState<PaneLayout>("split");
+  
+  // Feature 4: Share with password/TTL
+  const [showShareDialog, setShowShareDialog] = useState(false);
+  const [sharePassword, setSharePassword] = useState("");
+  const [shareTTL, setShareTTL] = useState<TTLOption>("none");
+  const [pendingPasswordPrompt, setPendingPasswordPrompt] = useState<string | null>(null);
+  const [passwordInput, setPasswordInput] = useState("");
 
   const highlighterRef = useRef<Highlighter | null>(null);
   const renderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -329,6 +278,8 @@ export default function MarkdownConverter() {
   const wordCount = countWords(input);
   const charCount = countChars(input);
   const lineCount = countLines(input);
+
+  const currentTheme = THEMES.find((t) => t.id === selectedTheme) || THEMES[0];
 
   const renderMermaid = useCallback(async (html: string): Promise<string> => {
     const tempDiv = document.createElement("div");
@@ -506,6 +457,18 @@ export default function MarkdownConverter() {
     const savedThemeName = localStorage.getItem("md-theme-name");
     if (savedThemeName) setActiveThemeName(savedThemeName);
 
+    // Feature 2: Load selected theme
+    const savedTheme = localStorage.getItem("md-selected-theme");
+    if (savedTheme && THEMES.find((t) => t.id === savedTheme)) {
+      setSelectedTheme(savedTheme);
+    }
+
+    // Feature 3: Load pane layout
+    const savedLayout = localStorage.getItem("md-pane-layout");
+    if (savedLayout && ["split", "editor-only", "preview-only"].includes(savedLayout)) {
+      setPaneLayout(savedLayout as PaneLayout);
+    }
+
     const savedLightVars = localStorage.getItem("md-theme-light-vars");
     const savedDarkVars = localStorage.getItem("md-theme-dark-vars");
     if (savedLightVars || savedDarkVars) {
@@ -522,21 +485,32 @@ export default function MarkdownConverter() {
       highlighterRef.current = h;
     });
 
-    // Check for shared document in URL hash
+    // Feature 4: Check for shared document in URL hash
     const hash = window.location.hash;
     if (hash.startsWith('#doc=')) {
-      try {
-        const compressed = hash.slice(5); // Remove '#doc='
-        const decompressed = decompressFromEncodedURIComponent(compressed);
-        if (decompressed) {
-          setInput(decompressed);
-          // Clear hash from URL after loading
-          window.history.replaceState(null, '', window.location.pathname);
-          toast("Loaded shared document");
+      const params = new URLSearchParams(hash.slice(1));
+      const compressed = params.get('doc');
+      const isProtected = params.get('p') === '1';
+      
+      if (compressed) {
+        if (isProtected) {
+          // Password required - show prompt
+          setPendingPasswordPrompt(compressed);
+        } else {
+          // No password - decode directly
+          const result = decodeShareLink(compressed, false);
+          if (result.success && result.payload) {
+            setInput(result.payload.content);
+            window.history.replaceState(null, '', window.location.pathname);
+            toast("Loaded shared document");
+          } else if (result.error === "expired") {
+            toast.error("This shared document has expired");
+            window.history.replaceState(null, '', window.location.pathname);
+          } else {
+            toast.error("Failed to load shared document");
+            window.history.replaceState(null, '', window.location.pathname);
+          }
         }
-      } catch (err) {
-        console.error('Failed to load shared document:', err);
-        toast.error("Failed to load shared document");
       }
     }
 
@@ -572,7 +546,7 @@ export default function MarkdownConverter() {
       // Cmd/Ctrl+Shift+S - Share
       if (isMod && e.shiftKey && e.key === "S") {
         e.preventDefault();
-        shareDocument();
+        quickShare();
       }
       
       // Cmd/Ctrl+K - Toggle URL import
@@ -586,11 +560,31 @@ export default function MarkdownConverter() {
         e.preventDefault();
         downloadHTML();
       }
+      
+      // Feature 1: Cmd/Ctrl+Shift+D - Download PDF
+      if (isMod && e.shiftKey && e.key === "D") {
+        e.preventDefault();
+        downloadPDF();
+      }
+      
+      // Feature 3: Cmd/Ctrl+1/2/3 - Pane layouts
+      if (isMod && e.key === "1") {
+        e.preventDefault();
+        changePaneLayout("split");
+      }
+      if (isMod && e.key === "2") {
+        e.preventDefault();
+        changePaneLayout("editor-only");
+      }
+      if (isMod && e.key === "3") {
+        e.preventDefault();
+        changePaneLayout("preview-only");
+      }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, activeDocId, renderedHtml, dark]);
+  }, [input, activeDocId, renderedHtml, dark, selectedTheme, paneLayout]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -778,7 +772,7 @@ export default function MarkdownConverter() {
   }
 
   function getFullHTML(): string {
-    const currentTheme = GITHUB_THEME[dark ? "dark" : "light"];
+    const currentThemeCSS = currentTheme[dark ? "dark" : "light"];
     const hasMermaid = renderedHtml.includes('class="mermaid-diagram"');
     const hasMath = renderedHtml.includes('class="katex');
     
@@ -790,14 +784,9 @@ export default function MarkdownConverter() {
 <title>${extractTitle()}</title>
 ${hasMath ? KATEX_CSS : ''}
 <style>
-${currentTheme}
+${currentThemeCSS}
 ${SHIKI_EXPORT_CSS}
-@media print {
-  body { background: #fff !important; color: #24292f !important; }
-  .markdown-body { max-width: 100%; padding: 0; }
-  .markdown-body * { color: inherit; }
-  .no-print { display: none !important; }
-}
+${PDF_PRINT_CSS}
 </style>
 </head>
 <body>
@@ -820,10 +809,48 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "page.html";
+    a.download = `${extractTitle().replace(/[^a-zA-Z0-9-_ ]/g, "").trim() || "document"}.html`;
     a.click();
     URL.revokeObjectURL(url);
-    toast("Downloaded page.html");
+    toast(`Downloaded ${extractTitle()}.html`);
+  }
+
+  // Feature 1: PDF Export
+  async function downloadPDF() {
+    const title = extractTitle().replace(/[^a-zA-Z0-9-_ ]/g, "").trim() || "document";
+    const element = document.createElement("div");
+    element.innerHTML = `<div class="markdown-body">${renderedHtml}</div>`;
+    
+    // Inject theme styles
+    const style = document.createElement("style");
+    style.textContent = currentTheme[dark ? "dark" : "light"];
+    element.insertBefore(style, element.firstChild);
+
+    const opt = {
+      margin: 15,
+      filename: `${title}.pdf`,
+      image: { type: 'jpeg' as const, quality: 0.98 },
+      html2canvas: { scale: 2 },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const },
+      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+    };
+
+    toast("Generating PDF...");
+    
+    try {
+      // Dynamic import to avoid SSR issues
+      const html2pdf = (await import("html2pdf.js")).default;
+      
+      await html2pdf()
+        .set(opt)
+        .from(element)
+        .save();
+      
+      toast(`Downloaded ${title}.pdf`);
+    } catch (err) {
+      console.error("PDF generation error:", err);
+      toast.error("Failed to generate PDF");
+    }
   }
 
   function openPreview() {
@@ -964,7 +991,30 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
     }
   }
 
-  function shareDocument() {
+  // Feature 2: Theme selector
+  function changeTheme(themeId: string) {
+    setSelectedTheme(themeId);
+    localStorage.setItem("md-selected-theme", themeId);
+    const theme = THEMES.find((t) => t.id === themeId);
+    if (theme) {
+      toast(`Theme: ${theme.name}`);
+    }
+  }
+
+  // Feature 3: Pane layout
+  function changePaneLayout(layout: PaneLayout) {
+    setPaneLayout(layout);
+    localStorage.setItem("md-pane-layout", layout);
+    const labels = {
+      "split": "Split view",
+      "editor-only": "Editor only",
+      "preview-only": "Preview only"
+    };
+    toast(labels[layout]);
+  }
+
+  // Feature 4: Share with password/TTL
+  function quickShare() {
     const content = input.trim();
     
     if (!content) {
@@ -973,14 +1023,8 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
     }
     
     try {
-      // Compress the markdown content
-      const compressed = compressToEncodedURIComponent(content);
+      const shareUrl = createShareLink(content, null, "none");
       
-      // Build the share URL
-      const baseUrl = `${window.location.origin}${window.location.pathname}`;
-      const shareUrl = `${baseUrl}#doc=${compressed}`;
-      
-      // Check size limits
       if (shareUrl.length > 12000) {
         toast.error("Content too large for URL sharing. Try shortening to under ~1,500 words.");
         return;
@@ -990,12 +1034,10 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
         toast("⚠️ Share link is large (~" + Math.floor(shareUrl.length / 1000) + "KB). May not work in all browsers.");
       }
       
-      // Copy to clipboard
       navigator.clipboard.writeText(shareUrl).then(() => {
         setShareSuccess(true);
         toast("Share link copied!");
         
-        // Reset the success state after 2 seconds
         setTimeout(() => {
           setShareSuccess(false);
         }, 2000);
@@ -1008,6 +1050,66 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
     }
   }
 
+  function createProtectedShare() {
+    const content = input.trim();
+    
+    if (!content) {
+      toast("Nothing to share");
+      return;
+    }
+    
+    try {
+      const shareUrl = createShareLink(
+        content,
+        sharePassword.trim() || null,
+        shareTTL
+      );
+      
+      if (shareUrl.length > 12000) {
+        toast.error("Content too large for URL sharing.");
+        return;
+      }
+      
+      navigator.clipboard.writeText(shareUrl).then(() => {
+        toast("Protected share link copied!");
+        setShowShareDialog(false);
+        setSharePassword("");
+        setShareTTL("none");
+      }).catch(() => {
+        toast.error("Failed to copy to clipboard");
+      });
+    } catch (err) {
+      console.error('Share error:', err);
+      toast.error("Failed to create share link");
+    }
+  }
+
+  function attemptPasswordDecode() {
+    if (!pendingPasswordPrompt || !passwordInput) return;
+    
+    const result = decodeShareLink(pendingPasswordPrompt, true, passwordInput);
+    
+    if (result.success && result.payload) {
+      setInput(result.payload.content);
+      setPendingPasswordPrompt(null);
+      setPasswordInput("");
+      window.history.replaceState(null, '', window.location.pathname);
+      toast("Loaded shared document");
+    } else if (result.error === "wrong-password") {
+      toast.error("Incorrect password");
+    } else if (result.error === "expired") {
+      toast.error("This shared document has expired");
+      setPendingPasswordPrompt(null);
+      setPasswordInput("");
+      window.history.replaceState(null, '', window.location.pathname);
+    } else {
+      toast.error("Failed to load shared document");
+      setPendingPasswordPrompt(null);
+      setPasswordInput("");
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }
+
   const activeDoc = documents.find((d) => d.id === activeDocId);
 
   if (!mounted) {
@@ -1016,6 +1118,9 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
 
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
   const modKey = isMac ? '⌘' : 'Ctrl';
+
+  const showEditor = paneLayout === "split" || paneLayout === "editor-only";
+  const showPreview = paneLayout === "split" || paneLayout === "preview-only";
 
   return (
     <TooltipProvider>
@@ -1071,299 +1176,386 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
         {/* Main content */}
         <div className="flex min-h-0 flex-1 flex-col md:flex-row">
           {/* Editor pane */}
-          <div className="flex min-h-0 flex-1 flex-col border-b md:border-b-0 md:border-r">
-            <div className="flex h-10 items-center justify-between border-b bg-muted text-muted-foreground px-4 no-print">
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  onClick={() => setShowDocSheet(true)}
-                >
-                  <FileText className="size-3" />
-                  <span className="hidden sm:inline">
-                    {activeDoc ? activeDoc.title : "Documents"}
-                  </span>
-                </Button>
-              </div>
-              <div className="flex items-center gap-1">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button 
-                      variant="ghost" 
-                      size="xs" 
-                      onClick={shareDocument}
-                      className="transition-all"
-                    >
-                      {shareSuccess ? (
-                        <Check className="size-3 text-green-600" />
-                      ) : (
-                        <Share2 className="size-3" />
-                      )}
-                      <span className="hidden sm:inline">Share</span>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Share ({modKey}+Shift+S)</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="ghost" size="xs" onClick={saveNow}>
-                      <Save className="size-3" />
-                      <span className="hidden sm:inline">Save</span>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Save ({modKey}+S)</TooltipContent>
-                </Tooltip>
-                <Button
-                  variant={autoSave ? "default" : "ghost"}
-                  size="xs"
-                  onClick={toggleAutoSave}
-                >
-                  <Save className="size-3" />
-                  <span className="hidden sm:inline">
-                    {autoSave ? "Auto" : "Auto-save"}
-                  </span>
-                </Button>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => {
-                        navigator.clipboard
-                          .writeText(input)
-                          .then(() => toast("Markdown copied to clipboard"));
-                      }}
-                    >
-                      <Copy className="size-3" />
-                      <span className="hidden sm:inline">Copy MD</span>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Copy raw markdown</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => {
-                        const title = extractTitle().replace(/[^a-zA-Z0-9-_ ]/g, "").trim() || "document";
-                        const blob = new Blob([input], { type: "text/markdown" });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        a.href = url;
-                        a.download = `${title}.md`;
-                        a.click();
-                        URL.revokeObjectURL(url);
-                        toast(`Downloaded ${title}.md`);
-                      }}
-                    >
-                      <Download className="size-3" />
-                      <span className="hidden sm:inline">Download MD</span>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Download as .md file</TooltipContent>
-                </Tooltip>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="ghost" size="xs">
-                      <Trash2 className="size-3" />
-                      <span className="hidden sm:inline">Clear</span>
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Clear document?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This will erase all content in the current document. This
-                        action cannot be undone.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction
-                        variant="destructive"
-                        onClick={clearAll}
-                      >
-                        Clear
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
-            </div>
-            
-            {/* Word/Char/Line count bar */}
-            <div className="flex items-center gap-3 border-b bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground no-print">
-              <span>{wordCount} words</span>
-              <span>·</span>
-              <span>{charCount} chars</span>
-              <span>·</span>
-              <span>{lineCount} lines</span>
-            </div>
-            
-            <div
-              className="relative min-h-0 flex-1"
-              onDragOver={onDragOver}
-              onDragLeave={onDragLeave}
-              onDrop={onDrop}
+          {showEditor && (
+            <div 
+              className={`flex min-h-0 flex-col border-b md:border-b-0 md:border-r transition-all duration-300 ${
+                paneLayout === "editor-only" ? "flex-1" : "flex-1"
+              }`}
             >
-              <textarea
-                ref={editorRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder={`# Hello World\n\nStart typing your markdown here...\n\n\`\`\`javascript\nfunction hello() {\n  console.log('Syntax highlighting!');\n}\n\`\`\``}
-                className="h-full w-full resize-none overflow-y-auto bg-transparent p-4 font-mono text-sm outline-none placeholder:text-muted-foreground/50"
-                spellCheck={false}
-              />
-              {dragging && (
-                <div className="absolute inset-0 flex items-center justify-center bg-primary/10 backdrop-blur-sm">
-                  <p className="text-lg font-medium text-primary">
-                    Drop .md file here
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Preview pane */}
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex h-10 items-center justify-between border-b bg-muted text-muted-foreground px-4 no-print">
-              <div className="flex items-center gap-2">
-                <Eye className="size-3.5" />
-                <span className="text-sm font-medium">Preview</span>
-              </div>
-              <div className="flex items-center gap-1">
-                {toc.length >= 2 && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant={showToc ? "default" : "ghost"}
-                        size="xs"
-                        onClick={() => setShowToc(!showToc)}
-                      >
-                        <List className="size-3" />
-                        <span className="hidden sm:inline">TOC</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Table of Contents</TooltipContent>
-                  </Tooltip>
-                )}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant={scrollSync ? "default" : "ghost"}
-                      size="xs"
-                      onClick={toggleScrollSync}
-                    >
-                      <ArrowUpDown className="size-3" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Scroll sync</TooltipContent>
-                </Tooltip>
-                {frontmatterData && (
+              <div className="flex h-10 items-center justify-between border-b bg-muted text-muted-foreground px-4 no-print">
+                <div className="flex items-center gap-1">
                   <Button
                     variant="ghost"
                     size="xs"
-                    onClick={() => setShowFrontmatter(!showFrontmatter)}
+                    onClick={() => setShowDocSheet(true)}
                   >
-                    Frontmatter {showFrontmatter ? "▾" : "▸"}
+                    <FileText className="size-3" />
+                    <span className="hidden sm:inline">
+                      {activeDoc ? activeDoc.title : "Documents"}
+                    </span>
                   </Button>
-                )}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="ghost" size="xs" onClick={copyHTML}>
-                      <Copy className="size-3" />
-                      <span className="hidden sm:inline">Copy HTML</span>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Copy HTML ({modKey}+Shift+C)</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="ghost" size="xs" onClick={downloadHTML}>
-                      <Download className="size-3" />
-                      <span className="hidden sm:inline">Download</span>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Download HTML ({modKey}+D)</TooltipContent>
-                </Tooltip>
-                <Button variant="ghost" size="xs" onClick={openPreview}>
-                  <ExternalLink className="size-3" />
-                  <span className="hidden sm:inline">Open Full Page</span>
-                </Button>
-              </div>
-            </div>
-
-            {/* Frontmatter card */}
-            {frontmatterData && showFrontmatter && (
-              <div className="border-b bg-muted/30 px-4 py-3 no-print">
-                <div className="space-y-1.5">
-                  {frontmatterData.title && (
-                    <h2 className="text-base font-semibold">
-                      {String(frontmatterData.title)}
-                    </h2>
-                  )}
-                  {frontmatterData.author && (
-                    <p className="text-sm">{String(frontmatterData.author)}</p>
-                  )}
-                  {(frontmatterData.pubDate || frontmatterData.date) && (
-                    <p className="text-sm">
-                      {formatDate(
-                        frontmatterData.pubDate || frontmatterData.date,
-                      )}
-                    </p>
-                  )}
-                  {frontmatterData.description && (
-                    <p className="text-sm text-muted-foreground">
-                      {String(frontmatterData.description)}
-                    </p>
-                  )}
-                  {Array.isArray(frontmatterData.tags) && (
-                    <div className="flex flex-wrap gap-1">
-                      {(frontmatterData.tags as string[]).map((tag) => (
-                        <span
-                          key={tag}
-                          className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
+                </div>
+                <div className="flex items-center gap-1">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="xs" onClick={() => setShowShareDialog(true)}>
+                        <Lock className="size-3" />
+                        <span className="hidden sm:inline">Share+</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Share with password/expiry</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        variant="ghost" 
+                        size="xs" 
+                        onClick={quickShare}
+                        className="transition-all"
+                      >
+                        {shareSuccess ? (
+                          <Check className="size-3 text-green-600" />
+                        ) : (
+                          <Share2 className="size-3" />
+                        )}
+                        <span className="hidden sm:inline">Share</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Quick share ({modKey}+Shift+S)</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="xs" onClick={saveNow}>
+                        <Save className="size-3" />
+                        <span className="hidden sm:inline">Save</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Save ({modKey}+S)</TooltipContent>
+                  </Tooltip>
+                  <Button
+                    variant={autoSave ? "default" : "ghost"}
+                    size="xs"
+                    onClick={toggleAutoSave}
+                  >
+                    <Save className="size-3" />
+                    <span className="hidden sm:inline">
+                      {autoSave ? "Auto" : "Auto-save"}
+                    </span>
+                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => {
+                          navigator.clipboard
+                            .writeText(input)
+                            .then(() => toast("Markdown copied to clipboard"));
+                        }}
+                      >
+                        <Copy className="size-3" />
+                        <span className="hidden sm:inline">Copy MD</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Copy raw markdown</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => {
+                          const title = extractTitle().replace(/[^a-zA-Z0-9-_ ]/g, "").trim() || "document";
+                          const blob = new Blob([input], { type: "text/markdown" });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = `${title}.md`;
+                          a.click();
+                          URL.revokeObjectURL(url);
+                          toast(`Downloaded ${title}.md`);
+                        }}
+                      >
+                        <Download className="size-3" />
+                        <span className="hidden sm:inline">Download MD</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Download as .md file</TooltipContent>
+                  </Tooltip>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="ghost" size="xs">
+                        <Trash2 className="size-3" />
+                        <span className="hidden sm:inline">Clear</span>
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Clear document?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will erase all content in the current document. This
+                          action cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          variant="destructive"
+                          onClick={clearAll}
                         >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                          Clear
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               </div>
-            )}
-
-            {/* TOC */}
-            {showToc && toc.length >= 2 && (
-              <div className="border-b bg-muted/30 px-4 py-3 no-print">
-                <h3 className="mb-2 text-sm font-semibold">Table of Contents</h3>
-                <nav className="space-y-1">
-                  {toc.map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => scrollToHeading(item.id)}
-                      className="block w-full text-left text-sm text-muted-foreground hover:text-foreground transition-colors"
-                      style={{ paddingLeft: `${(item.level - 1) * 12}px` }}
-                    >
-                      {item.text}
-                    </button>
-                  ))}
-                </nav>
+              
+              {/* Word/Char/Line count bar */}
+              <div className="flex items-center gap-3 border-b bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground no-print">
+                <span>{wordCount} words</span>
+                <span>·</span>
+                <span>{charCount} chars</span>
+                <span>·</span>
+                <span>{lineCount} lines</span>
               </div>
-            )}
+              
+              <div
+                className="relative min-h-0 flex-1"
+                onDragOver={onDragOver}
+                onDragLeave={onDragLeave}
+                onDrop={onDrop}
+              >
+                <textarea
+                  ref={editorRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder={`# Hello World\n\nStart typing your markdown here...\n\n\`\`\`javascript\nfunction hello() {\n  console.log('Syntax highlighting!');\n}\n\`\`\``}
+                  className="h-full w-full resize-none overflow-y-auto bg-transparent p-4 font-mono text-sm outline-none placeholder:text-muted-foreground/50"
+                  spellCheck={false}
+                />
+                {dragging && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-primary/10 backdrop-blur-sm">
+                    <p className="text-lg font-medium text-primary">
+                      Drop .md file here
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
-            {/* HTML preview */}
-            <div
-              ref={previewRef}
-              className="markdown-preview min-h-0 flex-1 overflow-y-auto p-4"
-              dangerouslySetInnerHTML={{ __html: renderedHtml }}
-            />
-          </div>
+          {/* Preview pane */}
+          {showPreview && (
+            <div className={`flex min-h-0 flex-col transition-all duration-300 ${
+              paneLayout === "preview-only" ? "flex-1" : "flex-1"
+            }`}>
+              <div className="flex h-10 items-center justify-between border-b bg-muted text-muted-foreground px-4 no-print">
+                <div className="flex items-center gap-2">
+                  <Eye className="size-3.5" />
+                  <span className="text-sm font-medium">Preview</span>
+                  
+                  {/* Feature 2: Theme selector */}
+                  <Select value={selectedTheme} onValueChange={changeTheme}>
+                    <SelectTrigger className="h-7 w-32 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {THEMES.map((theme) => (
+                        <SelectItem key={theme.id} value={theme.id} className="text-xs">
+                          {theme.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-1">
+                  {toc.length >= 2 && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant={showToc ? "default" : "ghost"}
+                          size="xs"
+                          onClick={() => setShowToc(!showToc)}
+                        >
+                          <List className="size-3" />
+                          <span className="hidden sm:inline">TOC</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Table of Contents</TooltipContent>
+                    </Tooltip>
+                  )}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant={scrollSync ? "default" : "ghost"}
+                        size="xs"
+                        onClick={toggleScrollSync}
+                      >
+                        <ArrowUpDown className="size-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Scroll sync</TooltipContent>
+                  </Tooltip>
+                  {frontmatterData && (
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => setShowFrontmatter(!showFrontmatter)}
+                    >
+                      Frontmatter {showFrontmatter ? "▾" : "▸"}
+                    </Button>
+                  )}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="xs" onClick={copyHTML}>
+                        <Copy className="size-3" />
+                        <span className="hidden sm:inline">Copy HTML</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Copy HTML ({modKey}+Shift+C)</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="xs" onClick={downloadHTML}>
+                        <Download className="size-3" />
+                        <span className="hidden sm:inline">Download</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Download HTML ({modKey}+D)</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="xs" onClick={downloadPDF}>
+                        <FileDown className="size-3" />
+                        <span className="hidden sm:inline">PDF</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Download PDF ({modKey}+Shift+D)</TooltipContent>
+                  </Tooltip>
+                  <Button variant="ghost" size="xs" onClick={openPreview}>
+                    <ExternalLink className="size-3" />
+                    <span className="hidden sm:inline">Open Full Page</span>
+                  </Button>
+                </div>
+              </div>
+
+              {/* Frontmatter card */}
+              {frontmatterData && showFrontmatter && (
+                <div className="border-b bg-muted/30 px-4 py-3 no-print">
+                  <div className="space-y-1.5">
+                    {frontmatterData.title && (
+                      <h2 className="text-base font-semibold">
+                        {String(frontmatterData.title)}
+                      </h2>
+                    )}
+                    {frontmatterData.author && (
+                      <p className="text-sm">{String(frontmatterData.author)}</p>
+                    )}
+                    {(frontmatterData.pubDate || frontmatterData.date) && (
+                      <p className="text-sm">
+                        {formatDate(
+                          frontmatterData.pubDate || frontmatterData.date,
+                        )}
+                      </p>
+                    )}
+                    {frontmatterData.description && (
+                      <p className="text-sm text-muted-foreground">
+                        {String(frontmatterData.description)}
+                      </p>
+                    )}
+                    {Array.isArray(frontmatterData.tags) && (
+                      <div className="flex flex-wrap gap-1">
+                        {(frontmatterData.tags as string[]).map((tag) => (
+                          <span
+                            key={tag}
+                            className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* TOC */}
+              {showToc && toc.length >= 2 && (
+                <div className="border-b bg-muted/30 px-4 py-3 no-print">
+                  <h3 className="mb-2 text-sm font-semibold">Table of Contents</h3>
+                  <nav className="space-y-1">
+                    {toc.map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => scrollToHeading(item.id)}
+                        className="block w-full text-left text-sm text-muted-foreground hover:text-foreground transition-colors"
+                        style={{ paddingLeft: `${(item.level - 1) * 12}px` }}
+                      >
+                        {item.text}
+                      </button>
+                    ))}
+                  </nav>
+                </div>
+              )}
+
+              {/* HTML preview */}
+              <div
+                ref={previewRef}
+                className="markdown-preview min-h-0 flex-1 overflow-y-auto p-4"
+                dangerouslySetInnerHTML={{ __html: renderedHtml }}
+              />
+              
+              {/* Inject theme CSS for live preview */}
+              <style dangerouslySetInnerHTML={{ 
+                __html: currentTheme[dark ? "dark" : "light"] 
+              }} />
+            </div>
+          )}
         </div>
 
         {/* Footer toolbar */}
         <footer className="flex flex-wrap items-center gap-2 border-t px-4 py-2 sm:px-6 no-print">
+          {/* Feature 3: Pane layout controls */}
+          <div className="flex items-center gap-1 border-r pr-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={paneLayout === "split" ? "default" : "ghost"}
+                  size="xs"
+                  onClick={() => changePaneLayout("split")}
+                >
+                  <Columns className="size-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Split ({modKey}+1)</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={paneLayout === "editor-only" ? "default" : "ghost"}
+                  size="xs"
+                  onClick={() => changePaneLayout("editor-only")}
+                >
+                  <Edit className="size-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Editor only ({modKey}+2)</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={paneLayout === "preview-only" ? "default" : "ghost"}
+                  size="xs"
+                  onClick={() => changePaneLayout("preview-only")}
+                >
+                  <Eye className="size-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Preview only ({modKey}+3)</TooltipContent>
+            </Tooltip>
+          </div>
+          
           <Dialog
             open={showUrlInput}
             onOpenChange={(open: boolean) => {
@@ -1610,6 +1802,97 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
           </AlertDialogContent>
         </AlertDialog>
 
+        {/* Feature 4: Share dialog with password/TTL */}
+        <Dialog open={showShareDialog} onOpenChange={setShowShareDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Share with Options</DialogTitle>
+              <DialogDescription>
+                Add optional password protection and expiry time.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="share-password">Password (optional)</Label>
+                <Input
+                  id="share-password"
+                  type="password"
+                  placeholder="Leave empty for no protection"
+                  value={sharePassword}
+                  onChange={(e) => setSharePassword(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="share-ttl">Expires</Label>
+                <Select value={shareTTL} onValueChange={(v) => setShareTTL(v as TTLOption)}>
+                  <SelectTrigger id="share-ttl">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Never</SelectItem>
+                    <SelectItem value="1h">1 hour</SelectItem>
+                    <SelectItem value="24h">24 hours</SelectItem>
+                    <SelectItem value="7d">7 days</SelectItem>
+                    <SelectItem value="30d">30 days</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={() => setShowShareDialog(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={createProtectedShare}>
+                  Create Share Link
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Feature 4: Password prompt dialog */}
+        <Dialog open={pendingPasswordPrompt !== null} onOpenChange={(open) => {
+          if (!open) {
+            setPendingPasswordPrompt(null);
+            setPasswordInput("");
+            window.history.replaceState(null, '', window.location.pathname);
+          }
+        }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Password Required</DialogTitle>
+              <DialogDescription>
+                This document is password protected. Enter the password to view it.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <Input
+                type="password"
+                placeholder="Enter password"
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    attemptPasswordDecode();
+                  }
+                }}
+                autoFocus
+              />
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={() => {
+                  setPendingPasswordPrompt(null);
+                  setPasswordInput("");
+                  window.history.replaceState(null, '', window.location.pathname);
+                }}>
+                  Cancel
+                </Button>
+                <Button onClick={attemptPasswordDecode}>
+                  Unlock
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
         {/* Keyboard shortcuts dialog */}
         <Dialog open={showShortcuts} onOpenChange={setShowShortcuts}>
           <DialogContent className="sm:max-w-md">
@@ -1627,7 +1910,7 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                 </kbd>
               </div>
               <div className="flex items-center justify-between text-sm">
-                <span>Share document</span>
+                <span>Quick share</span>
                 <kbd className="rounded bg-muted px-2 py-1 font-mono text-xs">
                   {modKey}+Shift+S
                 </kbd>
@@ -1639,15 +1922,39 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                 </kbd>
               </div>
               <div className="flex items-center justify-between text-sm">
-                <span>Toggle URL import</span>
-                <kbd className="rounded bg-muted px-2 py-1 font-mono text-xs">
-                  {modKey}+K
-                </kbd>
-              </div>
-              <div className="flex items-center justify-between text-sm">
                 <span>Download HTML</span>
                 <kbd className="rounded bg-muted px-2 py-1 font-mono text-xs">
                   {modKey}+D
+                </kbd>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span>Download PDF</span>
+                <kbd className="rounded bg-muted px-2 py-1 font-mono text-xs">
+                  {modKey}+Shift+D
+                </kbd>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span>Split view</span>
+                <kbd className="rounded bg-muted px-2 py-1 font-mono text-xs">
+                  {modKey}+1
+                </kbd>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span>Editor only</span>
+                <kbd className="rounded bg-muted px-2 py-1 font-mono text-xs">
+                  {modKey}+2
+                </kbd>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span>Preview only</span>
+                <kbd className="rounded bg-muted px-2 py-1 font-mono text-xs">
+                  {modKey}+3
+                </kbd>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span>Toggle URL import</span>
+                <kbd className="rounded bg-muted px-2 py-1 font-mono text-xs">
+                  {modKey}+K
                 </kbd>
               </div>
             </div>
