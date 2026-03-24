@@ -18,11 +18,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -31,7 +26,6 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Sheet,
   SheetContent,
@@ -65,24 +59,24 @@ import {
   ExternalLink,
   Link,
   Save,
-  Palette,
-  X,
   Eye,
   FileText,
   Plus,
   List,
   HelpCircle,
   ArrowUpDown,
-  Share2,
-  Check,
   Columns,
   Edit,
-  Lock,
   FileDown,
   Highlighter as HighlighterIcon,
 } from "lucide-react";
-import { THEMES, SHIKI_EXPORT_CSS, KATEX_CSS, MERMAID_SCRIPT, PDF_PRINT_CSS } from "@/lib/themes";
-import { createShareLink, decodeShareLink, type TTLOption } from "@/lib/share-utils";
+import {
+  THEMES,
+  SHIKI_EXPORT_CSS,
+  KATEX_CSS,
+  MERMAID_SCRIPT,
+  PDF_PRINT_CSS,
+} from "@/lib/themes";
 import { HighlightToolbar } from "@/components/highlight-toolbar";
 import { HighlightsPanel } from "@/components/highlights-panel";
 import { HighlightSummary } from "@/components/highlight-summary";
@@ -141,15 +135,27 @@ const SHIKI_LANGS = [
   "text",
 ];
 
-function toRawUrl(url: string): string {
-  const ghBlob = url.match(/github\.com\/([^/]+)\/([^/]+)\/blob\/(.+)/);
-  if (ghBlob)
-    return `https://raw.githubusercontent.com/${ghBlob[1]}/${ghBlob[2]}/${ghBlob[3]}`;
-  const gist = url.match(/gist\.github\.com\/([^/]+)\/([a-f0-9]+)$/);
-  if (gist)
-    return `https://gist.githubusercontent.com/${gist[1]}/${gist[2]}/raw`;
-  return url;
+function scopeThemeCSS(css: string): string {
+  function scopeSelector(sel: string): string {
+    sel = sel.trim();
+    if (!sel) return sel;
+    if (sel === "body") return ".markdown-preview";
+    if (sel.startsWith(".markdown-body")) return `.markdown-preview ${sel}`;
+    return `.markdown-preview ${sel}`;
+  }
+
+  return css.replace(
+    /([^{}@][^{}]*?)(\{)/g,
+    (_match, selectors: string, brace: string) => {
+      const scoped = selectors
+        .split(",")
+        .map(scopeSelector)
+        .join(", ");
+      return scoped + brace;
+    },
+  );
 }
+
 
 function formatDate(d: unknown): string {
   if (!d) return "";
@@ -216,17 +222,20 @@ function countLines(text: string): number {
 function extractToc(markdown: string): TocItem[] {
   const headings: TocItem[] = [];
   const lines = markdown.split("\n");
-  
+
   lines.forEach((line) => {
     const match = line.match(/^(#{1,6})\s+(.+)$/);
     if (match) {
       const level = match[1].length;
       const text = match[2].trim();
-      const id = text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+      const id = text
+        .toLowerCase()
+        .replace(/[^\w\s-]/g, "")
+        .replace(/\s+/g, "-");
       headings.push({ id, text, level });
     }
   });
-  
+
   return headings;
 }
 
@@ -235,16 +244,10 @@ export default function MarkdownConverter() {
   const [input, setInput] = useState("");
   const [renderedHtml, setRenderedHtml] = useState("");
   const [dark, setDark] = useState(false);
-  const [autoSave, setAutoSave] = useState(false);
-  const [showFrontmatter, setShowFrontmatter] = useState(true);
+
+  const [showFrontmatter, setShowFrontmatter] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [urlInput, setUrlInput] = useState("");
-  const [showUrlInput, setShowUrlInput] = useState(false);
-  const [urlLoading, setUrlLoading] = useState(false);
-  const [themeUrl, setThemeUrl] = useState("");
-  const [showThemeInput, setShowThemeInput] = useState(false);
-  const [themeLoading, setThemeLoading] = useState(false);
-  const [activeThemeName, setActiveThemeName] = useState("");
+
   const [documents, setDocuments] = useState<SavedDocument[]>([]);
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
   const [showDocSheet, setShowDocSheet] = useState(false);
@@ -252,20 +255,12 @@ export default function MarkdownConverter() {
   const [showToc, setShowToc] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [scrollSync, setScrollSync] = useState(true);
-  const [shareSuccess, setShareSuccess] = useState(false);
-  
+
   // Feature 2: Themes
   const [selectedTheme, setSelectedTheme] = useState("github");
-  
+
   // Feature 3: Pane layouts
   const [paneLayout, setPaneLayout] = useState<PaneLayout>("split");
-  
-  // Feature 4: Share with password/TTL
-  const [showShareDialog, setShowShareDialog] = useState(false);
-  const [sharePassword, setSharePassword] = useState("");
-  const [shareTTL, setShareTTL] = useState<TTLOption>("none");
-  const [pendingPasswordPrompt, setPendingPasswordPrompt] = useState<string | null>(null);
-  const [passwordInput, setPasswordInput] = useState("");
 
   // Highlights system
   const [highlights, setHighlights] = useState<Highlight[]>([]);
@@ -278,7 +273,7 @@ export default function MarkdownConverter() {
 
   const highlighterRef = useRef<Highlighter | null>(null);
   const renderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const isScrollingFromEditor = useRef(false);
@@ -305,25 +300,28 @@ export default function MarkdownConverter() {
   const renderMermaid = useCallback(async (html: string): Promise<string> => {
     const tempDiv = document.createElement("div");
     tempDiv.innerHTML = html;
-    
-    const mermaidBlocks = tempDiv.querySelectorAll('pre code.language-mermaid');
-    
+
+    const mermaidBlocks = tempDiv.querySelectorAll("pre code.language-mermaid");
+
     for (let i = 0; i < mermaidBlocks.length; i++) {
       const block = mermaidBlocks[i];
-      const code = block.textContent || '';
-      
+      const code = block.textContent || "";
+
       try {
-        const { svg } = await mermaid.render(`mermaid-${Date.now()}-${i}`, code);
-        const wrapper = document.createElement('div');
-        wrapper.className = 'mermaid-diagram';
+        const { svg } = await mermaid.render(
+          `mermaid-${Date.now()}-${i}`,
+          code,
+        );
+        const wrapper = document.createElement("div");
+        wrapper.className = "mermaid-diagram";
         wrapper.innerHTML = svg;
         block.parentElement?.replaceWith(wrapper);
       } catch (err) {
-        console.error('Mermaid render error:', err);
+        console.error("Mermaid render error:", err);
         // Keep the original code block on error
       }
     }
-    
+
     return tempDiv.innerHTML;
   }, []);
 
@@ -331,75 +329,87 @@ export default function MarkdownConverter() {
     // Replace block math $$...$$
     html = html.replace(/\$\$([\s\S]+?)\$\$/g, (match, tex) => {
       try {
-        return katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false });
+        return katex.renderToString(tex.trim(), {
+          displayMode: true,
+          throwOnError: false,
+        });
       } catch {
         return match;
       }
     });
-    
+
     // Replace inline math $...$
     html = html.replace(/\$([^$\n]+?)\$/g, (match, tex) => {
       try {
-        return katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false });
+        return katex.renderToString(tex.trim(), {
+          displayMode: false,
+          throwOnError: false,
+        });
       } catch {
         return match;
       }
     });
-    
+
     return html;
   }, []);
 
-  const renderMarkdown = useCallback(async (content: string) => {
-    if (!content) {
-      setRenderedHtml("");
-      return;
-    }
-    
-    let html = await marked.parse(content);
-    
-    // Apply syntax highlighting
-    const hl = highlighterRef.current;
-    if (hl) {
-      html = html.replace(
-        /<pre><code class="language-(\w+)">([\s\S]*?)<\/code><\/pre>/g,
-        (_: string, lang: string, code: string) => {
-          if (lang === 'mermaid') {
-            // Skip mermaid blocks for now, will handle separately
-            return `<pre><code class="language-mermaid">${code}</code></pre>`;
-          }
-          const decoded = code
-            .replace(/&amp;/g, "&")
-            .replace(/&lt;/g, "<")
-            .replace(/&gt;/g, ">")
-            .replace(/&quot;/g, '"')
-            .replace(/&#39;/g, "'");
-          try {
-            return hl.codeToHtml(decoded, {
-              lang: lang || "text",
-              themes: { light: "github-light", dark: "github-dark" },
-            });
-          } catch {
-            return `<pre><code class="language-${lang}">${code}</code></pre>`;
-          }
-        },
-      );
-    }
-    
-    // Apply math rendering
-    html = renderMath(html);
-    
-    // Apply mermaid rendering
-    html = await renderMermaid(html);
-    
-    // Add IDs to headings for TOC links
-    html = html.replace(/<h([1-6])>(.+?)<\/h\1>/g, (match, level, text) => {
-      const plainText = text.replace(/<[^>]+>/g, '');
-      const id = plainText.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
-      return `<h${level} id="${id}">${text}</h${level}>`;
-    });
-    
-    setRenderedHtml(html);
-  }, [renderMath, renderMermaid]);
+  const renderMarkdown = useCallback(
+    async (content: string) => {
+      if (!content) {
+        setRenderedHtml("");
+        return;
+      }
+
+      let html = await marked.parse(content);
+
+      // Apply syntax highlighting
+      const hl = highlighterRef.current;
+      if (hl) {
+        html = html.replace(
+          /<pre><code class="language-(\w+)">([\s\S]*?)<\/code><\/pre>/g,
+          (_: string, lang: string, code: string) => {
+            if (lang === "mermaid") {
+              // Skip mermaid blocks for now, will handle separately
+              return `<pre><code class="language-mermaid">${code}</code></pre>`;
+            }
+            const decoded = code
+              .replace(/&amp;/g, "&")
+              .replace(/&lt;/g, "<")
+              .replace(/&gt;/g, ">")
+              .replace(/&quot;/g, '"')
+              .replace(/&#39;/g, "'");
+            try {
+              return hl.codeToHtml(decoded, {
+                lang: lang || "text",
+                themes: { light: "github-light", dark: "github-dark" },
+              });
+            } catch {
+              return `<pre><code class="language-${lang}">${code}</code></pre>`;
+            }
+          },
+        );
+      }
+
+      // Apply math rendering
+      html = renderMath(html);
+
+      // Apply mermaid rendering
+      html = await renderMermaid(html);
+
+      // Add IDs to headings for TOC links
+      html = html.replace(/<h([1-6])>(.+?)<\/h\1>/g, (match, level, text) => {
+        const plainText = text.replace(/<[^>]+>/g, "");
+        const id = plainText
+          .toLowerCase()
+          .replace(/[^\w\s-]/g, "")
+          .replace(/\s+/g, "-");
+        return `<h${level} id="${id}">${text}</h${level}>`;
+      });
+
+      setRenderedHtml(html);
+    },
+    [renderMath, renderMermaid],
+  );
 
   useEffect(() => {
     if (renderTimerRef.current) clearTimeout(renderTimerRef.current);
@@ -411,19 +421,6 @@ export default function MarkdownConverter() {
     };
   }, [markdownContent, renderMarkdown]);
 
-  // Auto-save debounce
-  useEffect(() => {
-    if (!autoSave || !activeDocId) return;
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      saveCurrentDocument();
-    }, 1000);
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, autoSave, activeDocId]);
-
   // Initialize on mount
   useEffect(() => {
     const stored = localStorage.getItem("theme");
@@ -434,7 +431,7 @@ export default function MarkdownConverter() {
     }
 
     // Initialize mermaid
-    mermaid.initialize({ startOnLoad: false, theme: 'neutral' });
+    mermaid.initialize({ startOnLoad: false, theme: "neutral" });
 
     // Load documents with legacy migration
     let docs = readDocuments();
@@ -469,14 +466,8 @@ export default function MarkdownConverter() {
       localStorage.setItem("md-active-doc-id", docs[0].id);
     }
 
-    const savedAutoSave = localStorage.getItem("md-autosave");
-    if (savedAutoSave === "true") setAutoSave(true);
-
     const savedScrollSync = localStorage.getItem("md-scroll-sync");
     if (savedScrollSync === "false") setScrollSync(false);
-
-    const savedThemeName = localStorage.getItem("md-theme-name");
-    if (savedThemeName) setActiveThemeName(savedThemeName);
 
     // Feature 2: Load selected theme
     const savedTheme = localStorage.getItem("md-selected-theme");
@@ -486,17 +477,11 @@ export default function MarkdownConverter() {
 
     // Feature 3: Load pane layout
     const savedLayout = localStorage.getItem("md-pane-layout");
-    if (savedLayout && ["split", "editor-only", "preview-only"].includes(savedLayout)) {
+    if (
+      savedLayout &&
+      ["split", "editor-only", "preview-only"].includes(savedLayout)
+    ) {
       setPaneLayout(savedLayout as PaneLayout);
-    }
-
-    const savedLightVars = localStorage.getItem("md-theme-light-vars");
-    const savedDarkVars = localStorage.getItem("md-theme-dark-vars");
-    if (savedLightVars || savedDarkVars) {
-      applyThemeVars(
-        savedLightVars ? JSON.parse(savedLightVars) : {},
-        savedDarkVars ? JSON.parse(savedDarkVars) : {},
-      );
     }
 
     createHighlighter({
@@ -505,39 +490,6 @@ export default function MarkdownConverter() {
     }).then((h) => {
       highlighterRef.current = h;
     });
-
-    // Feature 4: Check for shared document in URL hash
-    const hash = window.location.hash;
-    if (hash.startsWith('#doc=')) {
-      const params = new URLSearchParams(hash.slice(1));
-      const compressed = params.get('doc');
-      const isProtected = params.get('p') === '1';
-      
-      if (compressed) {
-        if (isProtected) {
-          // Password required - show prompt
-          setPendingPasswordPrompt(compressed);
-        } else {
-          // No password - decode directly
-          const result = decodeShareLink(compressed, false);
-          if (result.success && result.payload) {
-            setInput(result.payload.content);
-            // Load shared highlights if present
-            if (result.payload.highlights && result.payload.highlights.length > 0) {
-              setHighlights(result.payload.highlights);
-            }
-            window.history.replaceState(null, '', window.location.pathname);
-            toast("Loaded shared document");
-          } else if (result.error === "expired") {
-            toast.error("This shared document has expired");
-            window.history.replaceState(null, '', window.location.pathname);
-          } else {
-            toast.error("Failed to load shared document");
-            window.history.replaceState(null, '', window.location.pathname);
-          }
-        }
-      }
-    }
 
     // Load highlights from localStorage
     const savedHighlights = loadHighlights();
@@ -559,14 +511,14 @@ export default function MarkdownConverter() {
   // Apply highlights to rendered HTML
   useEffect(() => {
     if (!previewRef.current || !renderedHtml) return;
-    
+
     // Small delay to ensure DOM is updated
     const timer = setTimeout(() => {
       if (previewRef.current) {
         applyHighlightsToDOM(previewRef.current, highlights);
       }
     }, 100);
-    
+
     return () => clearTimeout(timer);
   }, [renderedHtml, highlights]);
 
@@ -584,26 +536,45 @@ export default function MarkdownConverter() {
 
     function handleSelectionChange() {
       if (!preview) return;
-      
+
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-        setHighlightToolbar({ visible: false, position: { x: 0, y: 0 }, selection: null });
+        setHighlightToolbar({
+          visible: false,
+          position: { x: 0, y: 0 },
+          selection: null,
+        });
         return;
       }
 
       const range = selection.getRangeAt(0);
       const container = range.commonAncestorContainer;
-      
+
       // Check if selection is within preview
-      const isInPreview = preview.contains(container.nodeType === Node.TEXT_NODE ? container.parentNode : container);
+      const isInPreview = preview.contains(
+        container.nodeType === Node.TEXT_NODE
+          ? container.parentNode
+          : container,
+      );
       if (!isInPreview) {
-        setHighlightToolbar({ visible: false, position: { x: 0, y: 0 }, selection: null });
+        setHighlightToolbar({
+          visible: false,
+          position: { x: 0, y: 0 },
+          selection: null,
+        });
         return;
       }
 
       // Don't show toolbar if selecting within existing highlight or toolbar
-      const parentElement = container.nodeType === Node.TEXT_NODE ? container.parentElement : container as HTMLElement;
-      if (parentElement?.closest('.highlight-mark, .highlight-toolbar, .highlight-summary')) {
+      const parentElement =
+        container.nodeType === Node.TEXT_NODE
+          ? container.parentElement
+          : (container as HTMLElement);
+      if (
+        parentElement?.closest(
+          ".highlight-mark, .highlight-toolbar, .highlight-summary",
+        )
+      ) {
         return;
       }
 
@@ -636,24 +607,28 @@ export default function MarkdownConverter() {
 
     function handleClickOutside(e: MouseEvent) {
       const target = e.target as HTMLElement;
-      if (!target.closest('.highlight-toolbar')) {
+      if (!target.closest(".highlight-toolbar")) {
         const selection = window.getSelection();
         if (selection && !selection.isCollapsed) {
           // Selection still active, keep toolbar
           return;
         }
-        setHighlightToolbar({ visible: false, position: { x: 0, y: 0 }, selection: null });
+        setHighlightToolbar({
+          visible: false,
+          position: { x: 0, y: 0 },
+          selection: null,
+        });
       }
     }
 
-    preview.addEventListener('mouseup', handleMouseUp);
-    document.addEventListener('mousedown', handleClickOutside);
+    preview.addEventListener("mouseup", handleMouseUp);
+    document.addEventListener("mousedown", handleClickOutside);
 
     return () => {
-      preview.removeEventListener('mouseup', handleMouseUp);
-      document.removeEventListener('mousedown', handleClickOutside);
+      preview.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [previewRef.current]);
+  }, []);
 
   // Handle clicks on existing highlights to remove them
   useEffect(() => {
@@ -662,65 +637,54 @@ export default function MarkdownConverter() {
 
     function handleHighlightClick(e: MouseEvent) {
       const target = e.target as HTMLElement;
-      const highlightMark = target.closest('.highlight-mark') as HTMLElement;
-      
+      const highlightMark = target.closest(".highlight-mark") as HTMLElement;
+
       if (highlightMark) {
         const highlightId = highlightMark.dataset.highlightId;
         if (highlightId) {
           // Show confirmation or just remove
-          if (confirm('Remove this highlight?')) {
+          if (confirm("Remove this highlight?")) {
             removeHighlight(highlightId);
           }
         }
       }
     }
 
-    preview.addEventListener('click', handleHighlightClick);
-    return () => preview.removeEventListener('click', handleHighlightClick);
-  }, [previewRef.current]);
+    preview.addEventListener("click", handleHighlightClick);
+    return () => preview.removeEventListener("click", handleHighlightClick);
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const isMod = e.metaKey || e.ctrlKey;
-      
+
       // Cmd/Ctrl+S - Save
       if (isMod && e.key === "s") {
         e.preventDefault();
         saveCurrentDocument();
         toast("Saved to browser");
       }
-      
+
       // Cmd/Ctrl+Shift+C - Copy HTML
       if (isMod && e.shiftKey && e.key === "C") {
         e.preventDefault();
         copyHTML();
       }
-      
-      // Cmd/Ctrl+Shift+S - Share
-      if (isMod && e.shiftKey && e.key === "S") {
-        e.preventDefault();
-        quickShare();
-      }
-      
-      // Cmd/Ctrl+K - Toggle URL import
-      if (isMod && e.key === "k") {
-        e.preventDefault();
-        setShowUrlInput((prev) => !prev);
-      }
-      
+
+
       // Cmd/Ctrl+D - Download HTML
       if (isMod && e.key === "d") {
         e.preventDefault();
         downloadHTML();
       }
-      
+
       // Feature 1: Cmd/Ctrl+Shift+D - Download PDF
       if (isMod && e.shiftKey && e.key === "D") {
         e.preventDefault();
         downloadPDF();
       }
-      
+
       // Feature 3: Cmd/Ctrl+1/2/3 - Pane layouts
       if (isMod && e.key === "1") {
         e.preventDefault();
@@ -751,9 +715,10 @@ export default function MarkdownConverter() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlighterRef.current]);
 
-  // Scroll sync
+  // Scroll sync — depends on paneLayout and mounted so listeners
+  // attach after the editor/preview DOM nodes actually exist.
   useEffect(() => {
-    if (!scrollSync) return;
+    if (!scrollSync || !mounted) return;
 
     const editor = editorRef.current;
     const preview = previewRef.current;
@@ -764,14 +729,16 @@ export default function MarkdownConverter() {
 
     const handleEditorScroll = () => {
       if (isScrollingFromPreview.current) return;
-      
+
       clearTimeout(editorTimeout);
       isScrollingFromEditor.current = true;
-      
-      const scrollPercentage = editor.scrollTop / (editor.scrollHeight - editor.clientHeight);
-      const targetScroll = scrollPercentage * (preview.scrollHeight - preview.clientHeight);
+
+      const scrollPercentage =
+        editor.scrollTop / (editor.scrollHeight - editor.clientHeight);
+      const targetScroll =
+        scrollPercentage * (preview.scrollHeight - preview.clientHeight);
       preview.scrollTop = targetScroll;
-      
+
       editorTimeout = setTimeout(() => {
         isScrollingFromEditor.current = false;
       }, 100);
@@ -779,29 +746,31 @@ export default function MarkdownConverter() {
 
     const handlePreviewScroll = () => {
       if (isScrollingFromEditor.current) return;
-      
+
       clearTimeout(previewTimeout);
       isScrollingFromPreview.current = true;
-      
-      const scrollPercentage = preview.scrollTop / (preview.scrollHeight - preview.clientHeight);
-      const targetScroll = scrollPercentage * (editor.scrollHeight - editor.clientHeight);
+
+      const scrollPercentage =
+        preview.scrollTop / (preview.scrollHeight - preview.clientHeight);
+      const targetScroll =
+        scrollPercentage * (editor.scrollHeight - editor.clientHeight);
       editor.scrollTop = targetScroll;
-      
+
       previewTimeout = setTimeout(() => {
         isScrollingFromPreview.current = false;
       }, 100);
     };
 
-    editor.addEventListener('scroll', handleEditorScroll);
-    preview.addEventListener('scroll', handlePreviewScroll);
+    editor.addEventListener("scroll", handleEditorScroll);
+    preview.addEventListener("scroll", handlePreviewScroll);
 
     return () => {
-      editor.removeEventListener('scroll', handleEditorScroll);
-      preview.removeEventListener('scroll', handlePreviewScroll);
+      editor.removeEventListener("scroll", handleEditorScroll);
+      preview.removeEventListener("scroll", handlePreviewScroll);
       clearTimeout(editorTimeout);
       clearTimeout(previewTimeout);
     };
-  }, [scrollSync]);
+  }, [scrollSync, mounted, paneLayout]);
 
   // --- Document helpers ---
 
@@ -902,7 +871,7 @@ export default function MarkdownConverter() {
 
     // Get full text content
     const fullText = preClone.textContent || "";
-    
+
     // Find approximate position (this is a simplified approach)
     // For production, you'd want more robust text location
     const beforeRange = range.cloneRange();
@@ -910,7 +879,11 @@ export default function MarkdownConverter() {
     beforeRange.setEnd(range.startContainer, range.startOffset);
     const selectionStart = beforeRange.toString().length;
 
-    const textFragment = createTextFragment(fullText, selectedText, selectionStart);
+    const textFragment = createTextFragment(
+      fullText,
+      selectedText,
+      selectionStart,
+    );
 
     const newHighlight: Highlight = {
       id: crypto.randomUUID(),
@@ -921,11 +894,15 @@ export default function MarkdownConverter() {
     };
 
     setHighlights((prev) => [...prev, newHighlight]);
-    
+
     // Clear selection and toolbar
     selection.removeAllRanges();
-    setHighlightToolbar({ visible: false, position: { x: 0, y: 0 }, selection: null });
-    
+    setHighlightToolbar({
+      visible: false,
+      position: { x: 0, y: 0 },
+      selection: null,
+    });
+
     toast(`Added ${type} highlight`);
   }
 
@@ -936,7 +913,7 @@ export default function MarkdownConverter() {
 
   function clearAllHighlights() {
     if (highlights.length === 0) return;
-    
+
     if (confirm(`Remove all ${highlights.length} highlights?`)) {
       setHighlights([]);
       clearHighlights();
@@ -950,12 +927,12 @@ export default function MarkdownConverter() {
 
     const mark = preview.querySelector(`[data-highlight-id="${id}"]`);
     if (mark) {
-      mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      
+      mark.scrollIntoView({ behavior: "smooth", block: "center" });
+
       // Flash effect
-      mark.classList.add('ring-2', 'ring-primary');
+      mark.classList.add("ring-2", "ring-primary");
       setTimeout(() => {
-        mark.classList.remove('ring-2', 'ring-primary');
+        mark.classList.remove("ring-2", "ring-primary");
       }, 1500);
     }
   }
@@ -968,18 +945,6 @@ export default function MarkdownConverter() {
       localStorage.setItem("theme", next ? "dark" : "light");
       return next;
     });
-  }
-
-  function toggleAutoSave() {
-    const next = !autoSave;
-    setAutoSave(next);
-    localStorage.setItem("md-autosave", String(next));
-    if (next) {
-      saveCurrentDocument();
-      toast("Auto-save enabled");
-    } else {
-      toast("Auto-save disabled");
-    }
   }
 
   function toggleScrollSync() {
@@ -1003,14 +968,14 @@ export default function MarkdownConverter() {
     const currentThemeCSS = currentTheme[dark ? "dark" : "light"];
     const hasMermaid = renderedHtml.includes('class="mermaid-diagram"');
     const hasMath = renderedHtml.includes('class="katex');
-    
+
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${extractTitle()}</title>
-${hasMath ? KATEX_CSS : ''}
+${hasMath ? KATEX_CSS : ""}
 <style>
 ${currentThemeCSS}
 ${SHIKI_EXPORT_CSS}
@@ -1021,7 +986,7 @@ ${PDF_PRINT_CSS}
 <div class="markdown-body">
 ${renderedHtml}
 </div>
-${hasMermaid ? MERMAID_SCRIPT : ''}
+${hasMermaid ? MERMAID_SCRIPT : ""}
 </body>
 </html>`;
   }
@@ -1037,7 +1002,11 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${extractTitle().replace(/[^a-zA-Z0-9-_ ]/g, "").trim() || "document"}.html`;
+    a.download = `${
+      extractTitle()
+        .replace(/[^a-zA-Z0-9-_ ]/g, "")
+        .trim() || "document"
+    }.html`;
     a.click();
     URL.revokeObjectURL(url);
     toast(`Downloaded ${extractTitle()}.html`);
@@ -1045,10 +1014,14 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
 
   // Feature 1: PDF Export
   async function downloadPDF() {
-    const title = extractTitle().replace(/[^a-zA-Z0-9-_ ]/g, "").trim() || "document";
-    
+    const title =
+      extractTitle()
+        .replace(/[^a-zA-Z0-9-_ ]/g, "")
+        .trim() || "document";
+
     // Detect iOS/mobile — html2pdf.js struggles on iOS Safari due to html2canvas limitations
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+    const isIOS =
+      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
       (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
     const isMobile = isIOS || /Android/i.test(navigator.userAgent);
 
@@ -1068,7 +1041,7 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
 
     const element = document.createElement("div");
     element.innerHTML = `<div class="markdown-body">${renderedHtml}</div>`;
-    
+
     // Inject theme styles
     const style = document.createElement("style");
     style.textContent = currentTheme[dark ? "dark" : "light"];
@@ -1077,23 +1050,20 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
     const opt = {
       margin: 15,
       filename: `${title}.pdf`,
-      image: { type: 'jpeg' as const, quality: 0.98 },
+      image: { type: "jpeg" as const, quality: 0.98 },
       html2canvas: { scale: 2, useCORS: true, logging: false },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const },
-      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+      jsPDF: { unit: "mm", format: "a4", orientation: "portrait" as const },
+      pagebreak: { mode: ["avoid-all", "css", "legacy"] },
     };
 
     toast("Generating PDF...");
-    
+
     try {
       // Dynamic import to avoid SSR issues
       const html2pdf = (await import("html2pdf.js")).default;
-      
-      await html2pdf()
-        .set(opt)
-        .from(element)
-        .save();
-      
+
+      await html2pdf().set(opt).from(element).save();
+
       toast(`Downloaded ${title}.pdf`);
     } catch (err) {
       console.error("PDF generation error:", err);
@@ -1154,97 +1124,15 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
     reader.readAsText(file);
   }
 
-  async function fetchUrl() {
-    const url = urlInput.trim();
-    if (!url) return;
-    setUrlLoading(true);
-    try {
-      const rawUrl = toRawUrl(url);
-      const res = await fetch(rawUrl);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      setInput(text);
-      setShowUrlInput(false);
-      setUrlInput("");
-      toast("Loaded from URL");
-    } catch (err) {
-      toast.error(`Failed to fetch: ${(err as Error).message}`);
-    } finally {
-      setUrlLoading(false);
-    }
-  }
-
-  function applyThemeVars(
-    lightVars: Record<string, string>,
-    darkVars: Record<string, string>,
-  ) {
-    const root = document.documentElement;
-    for (const [key, value] of Object.entries(lightVars)) {
-      root.style.setProperty(`--${key}`, value);
-    }
-    const existing = document.getElementById("md-theme-dark-override");
-    if (existing) existing.remove();
-    const declarations = Object.entries(darkVars)
-      .map(([key, value]) => `--${key}: ${value};`)
-      .join("\n  ");
-    const style = document.createElement("style");
-    style.id = "md-theme-dark-override";
-    style.textContent = `.dark {\n  ${declarations}\n}`;
-    document.head.appendChild(style);
-  }
-
-  async function applyThemeFromUrl() {
-    const url = themeUrl.trim();
-    if (!url) return;
-    setThemeLoading(true);
-    try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      if (!json.cssVars)
-        throw new Error("Invalid theme JSON — missing cssVars");
-
-      const lightVars = json.cssVars.light || {};
-      const darkVars = json.cssVars.dark || {};
-
-      applyThemeVars(lightVars, darkVars);
-
-      const name = json.name || "Custom";
-      setActiveThemeName(name);
-      localStorage.setItem("md-theme-url", url);
-      localStorage.setItem("md-theme-name", name);
-      localStorage.setItem("md-theme-light-vars", JSON.stringify(lightVars));
-      localStorage.setItem("md-theme-dark-vars", JSON.stringify(darkVars));
-      setShowThemeInput(false);
-      setThemeUrl("");
-      toast(`Theme "${name}" applied`);
-    } catch (err) {
-      toast.error(`Failed to load theme: ${(err as Error).message}`);
-    } finally {
-      setThemeLoading(false);
-    }
-  }
-
-  function resetTheme() {
-    document.documentElement.removeAttribute("style");
-    const existing = document.getElementById("md-theme-dark-override");
-    if (existing) existing.remove();
-    document.documentElement.classList.toggle("dark", dark);
-    setActiveThemeName("");
-    localStorage.removeItem("md-theme-url");
-    localStorage.removeItem("md-theme-name");
-    localStorage.removeItem("md-theme-light-vars");
-    localStorage.removeItem("md-theme-dark-vars");
-    toast("Theme reset to default");
-  }
 
   function scrollToHeading(id: string) {
     const preview = previewRef.current;
     if (!preview) return;
-    
-    const heading = preview.querySelector(`#${id}`);
+
+    const heading = preview.querySelector(`#${CSS.escape(id)}`);
     if (heading) {
-      heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const headingTop = (heading as HTMLElement).offsetTop;
+      preview.scrollTo({ top: headingTop, behavior: "smooth" });
     }
   }
 
@@ -1263,113 +1151,11 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
     setPaneLayout(layout);
     localStorage.setItem("md-pane-layout", layout);
     const labels = {
-      "split": "Split view",
+      split: "Split view",
       "editor-only": "Editor only",
-      "preview-only": "Preview only"
+      "preview-only": "Preview only",
     };
     toast(labels[layout]);
-  }
-
-  // Feature 4: Share with password/TTL
-  function quickShare() {
-    const content = input.trim();
-    
-    if (!content) {
-      toast("Nothing to share");
-      return;
-    }
-    
-    try {
-      const shareUrl = createShareLink(content, null, "none", highlights.length > 0 ? highlights : undefined);
-      
-      if (shareUrl.length > 12000) {
-        toast.error("Content too large for URL sharing. Try shortening to under ~1,500 words.");
-        return;
-      }
-      
-      if (shareUrl.length > 8000) {
-        toast("⚠️ Share link is large (~" + Math.floor(shareUrl.length / 1000) + "KB). May not work in all browsers.");
-      }
-      
-      navigator.clipboard.writeText(shareUrl).then(() => {
-        setShareSuccess(true);
-        toast("Share link copied!");
-        
-        setTimeout(() => {
-          setShareSuccess(false);
-        }, 2000);
-      }).catch(() => {
-        toast.error("Failed to copy to clipboard");
-      });
-    } catch (err) {
-      console.error('Share error:', err);
-      toast.error("Failed to create share link");
-    }
-  }
-
-  function createProtectedShare() {
-    const content = input.trim();
-    
-    if (!content) {
-      toast("Nothing to share");
-      return;
-    }
-    
-    try {
-      const shareUrl = createShareLink(
-        content,
-        sharePassword.trim() || null,
-        shareTTL,
-        highlights.length > 0 ? highlights : undefined
-      );
-      
-      if (shareUrl.length > 12000) {
-        toast.error("Content too large for URL sharing.");
-        return;
-      }
-      
-      navigator.clipboard.writeText(shareUrl).then(() => {
-        toast("Protected share link copied!");
-        setShowShareDialog(false);
-        setSharePassword("");
-        setShareTTL("none");
-      }).catch(() => {
-        toast.error("Failed to copy to clipboard");
-      });
-    } catch (err) {
-      console.error('Share error:', err);
-      toast.error("Failed to create share link");
-    }
-  }
-
-  function attemptPasswordDecode() {
-    if (!pendingPasswordPrompt || !passwordInput) return;
-    
-    const result = decodeShareLink(pendingPasswordPrompt, true, passwordInput);
-    
-    if (result.success && result.payload) {
-      setInput(result.payload.content);
-      // Load shared highlights if present
-      if (result.payload.highlights && result.payload.highlights.length > 0) {
-        setHighlights(result.payload.highlights);
-      }
-      setPendingPasswordPrompt(null);
-      setPasswordInput("");
-      window.history.replaceState(null, '', window.location.pathname);
-      toast("Loaded shared document");
-    } else if (result.error === "wrong-password") {
-      toast.error("Incorrect password");
-    } else if (result.error === "expired") {
-      toast.error("This shared document has expired");
-      setPendingPasswordPrompt(null);
-      setPasswordInput("");
-      window.history.replaceState(null, '', window.location.pathname);
-    } else {
-      toast.error("Failed to load shared document");
-      setPendingPasswordPrompt(null);
-      setPasswordInput("");
-      window.history.replaceState(null, '', window.location.pathname);
-    }
   }
 
   const activeDoc = documents.find((d) => d.id === activeDocId);
@@ -1378,8 +1164,10 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
     return <div className="flex h-screen flex-col overflow-hidden" />;
   }
 
-  const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-  const modKey = isMac ? '⌘' : 'Ctrl';
+  const isMac =
+    typeof navigator !== "undefined" &&
+    navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+  const modKey = isMac ? "⌘" : "Ctrl";
 
   const showEditor = paneLayout === "split" || paneLayout === "editor-only";
   const showPreview = paneLayout === "split" || paneLayout === "preview-only";
@@ -1402,7 +1190,11 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
             <div className="flex items-center gap-1">
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" onClick={() => setShowShortcuts(true)}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setShowShortcuts(true)}
+                  >
                     <HelpCircle className="size-4" />
                   </Button>
                 </TooltipTrigger>
@@ -1426,10 +1218,16 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button variant="ghost" size="icon" onClick={toggleTheme}>
-                    {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+                    {dark ? (
+                      <Sun className="size-4" />
+                    ) : (
+                      <Moon className="size-4" />
+                    )}
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>{dark ? "Light mode" : "Dark mode"}</TooltipContent>
+                <TooltipContent>
+                  {dark ? "Light mode" : "Dark mode"}
+                </TooltipContent>
               </Tooltip>
             </div>
           </div>
@@ -1439,7 +1237,7 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
         <div className="flex min-h-0 flex-1 flex-col md:flex-row">
           {/* Editor pane */}
           {showEditor && (
-            <div 
+            <div
               className={`flex min-h-0 flex-col border-b md:border-b-0 md:border-r transition-all duration-300 ${
                 paneLayout === "editor-only" ? "flex-1" : "flex-1"
               }`}
@@ -1460,33 +1258,6 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                 <div className="flex items-center gap-1">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="ghost" size="xs" onClick={() => setShowShareDialog(true)}>
-                        <Lock className="size-3" />
-                        <span className="hidden sm:inline">Share+</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Share with password/expiry</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button 
-                        variant="ghost" 
-                        size="xs" 
-                        onClick={quickShare}
-                        className="transition-all"
-                      >
-                        {shareSuccess ? (
-                          <Check className="size-3 text-green-600" />
-                        ) : (
-                          <Share2 className="size-3" />
-                        )}
-                        <span className="hidden sm:inline">Share</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Quick share ({modKey}+Shift+S)</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
                       <Button variant="ghost" size="xs" onClick={saveNow}>
                         <Save className="size-3" />
                         <span className="hidden sm:inline">Save</span>
@@ -1494,16 +1265,7 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                     </TooltipTrigger>
                     <TooltipContent>Save ({modKey}+S)</TooltipContent>
                   </Tooltip>
-                  <Button
-                    variant={autoSave ? "default" : "ghost"}
-                    size="xs"
-                    onClick={toggleAutoSave}
-                  >
-                    <Save className="size-3" />
-                    <span className="hidden sm:inline">
-                      {autoSave ? "Auto" : "Auto-save"}
-                    </span>
-                  </Button>
+
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -1527,8 +1289,13 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                         variant="ghost"
                         size="xs"
                         onClick={() => {
-                          const title = extractTitle().replace(/[^a-zA-Z0-9-_ ]/g, "").trim() || "document";
-                          const blob = new Blob([input], { type: "text/markdown" });
+                          const title =
+                            extractTitle()
+                              .replace(/[^a-zA-Z0-9-_ ]/g, "")
+                              .trim() || "document";
+                          const blob = new Blob([input], {
+                            type: "text/markdown",
+                          });
                           const url = URL.createObjectURL(blob);
                           const a = document.createElement("a");
                           a.href = url;
@@ -1555,8 +1322,8 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                       <AlertDialogHeader>
                         <AlertDialogTitle>Clear document?</AlertDialogTitle>
                         <AlertDialogDescription>
-                          This will erase all content in the current document. This
-                          action cannot be undone.
+                          This will erase all content in the current document.
+                          This action cannot be undone.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
@@ -1572,7 +1339,7 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                   </AlertDialog>
                 </div>
               </div>
-              
+
               {/* Word/Char/Line count bar */}
               <div className="flex items-center gap-3 border-b bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground no-print">
                 <span>{wordCount} words</span>
@@ -1580,8 +1347,13 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                 <span>{charCount} chars</span>
                 <span>·</span>
                 <span>{lineCount} lines</span>
+                <span className="ml-auto">
+                  {activeDoc
+                    ? `Updated ${relativeTime(activeDoc.updatedAt)}`
+                    : ""}
+                </span>
               </div>
-              
+
               <div
                 className="relative min-h-0 flex-1"
                 onDragOver={onDragOver}
@@ -1609,27 +1381,15 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
 
           {/* Preview pane */}
           {showPreview && (
-            <div className={`flex min-h-0 flex-col transition-all duration-300 ${
-              paneLayout === "preview-only" ? "flex-1" : "flex-1"
-            }`}>
+            <div
+              className={`flex min-h-0 min-w-0 flex-col transition-all duration-300 ${
+                paneLayout === "preview-only" ? "flex-1" : "flex-1"
+              }`}
+            >
               <div className="flex h-10 items-center justify-between border-b bg-muted text-muted-foreground px-4 no-print">
                 <div className="flex items-center gap-2">
                   <Eye className="size-3.5" />
                   <span className="text-sm font-medium">Preview</span>
-                  
-                  {/* Feature 2: Theme selector */}
-                  <Select value={selectedTheme} onValueChange={changeTheme}>
-                    <SelectTrigger className="h-7 w-32 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {THEMES.map((theme) => (
-                        <SelectItem key={theme.id} value={theme.id} className="text-xs">
-                          {theme.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
                 </div>
                 <div className="flex items-center gap-1">
                   <Tooltip>
@@ -1637,7 +1397,9 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                       <Button
                         variant={showHighlightsPanel ? "default" : "ghost"}
                         size="xs"
-                        onClick={() => setShowHighlightsPanel(!showHighlightsPanel)}
+                        onClick={() =>
+                          setShowHighlightsPanel(!showHighlightsPanel)
+                        }
                         className="relative"
                       >
                         <HighlighterIcon className="size-3" />
@@ -1651,21 +1413,6 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                     </TooltipTrigger>
                     <TooltipContent>Highlights panel</TooltipContent>
                   </Tooltip>
-                  {toc.length >= 2 && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant={showToc ? "default" : "ghost"}
-                          size="xs"
-                          onClick={() => setShowToc(!showToc)}
-                        >
-                          <List className="size-3" />
-                          <span className="hidden sm:inline">TOC</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Table of Contents</TooltipContent>
-                    </Tooltip>
-                  )}
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -1678,15 +1425,6 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                     </TooltipTrigger>
                     <TooltipContent>Scroll sync</TooltipContent>
                   </Tooltip>
-                  {frontmatterData && (
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => setShowFrontmatter(!showFrontmatter)}
-                    >
-                      Frontmatter {showFrontmatter ? "▾" : "▸"}
-                    </Button>
-                  )}
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button variant="ghost" size="xs" onClick={copyHTML}>
@@ -1694,7 +1432,9 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                         <span className="hidden sm:inline">Copy HTML</span>
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>Copy HTML ({modKey}+Shift+C)</TooltipContent>
+                    <TooltipContent>
+                      Copy HTML ({modKey}+Shift+C)
+                    </TooltipContent>
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -1712,13 +1452,56 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                         <span className="hidden sm:inline">PDF</span>
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>Download PDF ({modKey}+Shift+D)</TooltipContent>
+                    <TooltipContent>
+                      Download PDF ({modKey}+Shift+D)
+                    </TooltipContent>
                   </Tooltip>
                   <Button variant="ghost" size="xs" onClick={openPreview}>
                     <ExternalLink className="size-3" />
                     <span className="hidden sm:inline">Open Full Page</span>
                   </Button>
                 </div>
+              </div>
+
+              {/* Preview subnav */}
+              <div className="flex items-center gap-3 border-b bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground no-print">
+                {frontmatterData && (
+                  <button
+                    onClick={() => setShowFrontmatter(!showFrontmatter)}
+                    className="flex items-center gap-1 hover:text-foreground transition-colors"
+                  >
+                    <FileText className="size-3" />
+                    Details {showFrontmatter ? "▾" : "▸"}
+                  </button>
+                )}
+                {toc.length >= 2 && (
+                  <>
+                    {frontmatterData && <span>·</span>}
+                    <button
+                      onClick={() => setShowToc(true)}
+                      className="flex items-center gap-1 hover:text-foreground transition-colors"
+                    >
+                      <List className="size-3" />
+                      TOC
+                    </button>
+                  </>
+                )}
+                <Select value={selectedTheme} onValueChange={changeTheme}>
+                  <SelectTrigger className="ml-auto h-6 w-28 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {THEMES.map((theme) => (
+                      <SelectItem
+                        key={theme.id}
+                        value={theme.id}
+                        className="text-xs"
+                      >
+                        {theme.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Frontmatter card */}
@@ -1731,7 +1514,9 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                       </h2>
                     )}
                     {frontmatterData.author && (
-                      <p className="text-sm">{String(frontmatterData.author)}</p>
+                      <p className="text-sm">
+                        {String(frontmatterData.author)}
+                      </p>
                     )}
                     {(frontmatterData.pubDate || frontmatterData.date) && (
                       <p className="text-sm">
@@ -1761,41 +1546,24 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                 </div>
               )}
 
-              {/* TOC */}
-              {showToc && toc.length >= 2 && (
-                <div className="border-b bg-muted/30 px-4 py-3 no-print">
-                  <h3 className="mb-2 text-sm font-semibold">Table of Contents</h3>
-                  <nav className="space-y-1">
-                    {toc.map((item) => (
-                      <button
-                        key={item.id}
-                        onClick={() => scrollToHeading(item.id)}
-                        className="block w-full text-left text-sm text-muted-foreground hover:text-foreground transition-colors"
-                        style={{ paddingLeft: `${(item.level - 1) * 12}px` }}
-                      >
-                        {item.text}
-                      </button>
-                    ))}
-                  </nav>
-                </div>
-              )}
-
               {/* HTML preview */}
               <div
                 ref={previewRef}
-                className="markdown-preview min-h-0 flex-1 overflow-y-auto p-4"
+                className="markdown-preview min-h-0 flex-1 overflow-y-auto overflow-x-hidden wrap-break-word p-4"
               >
                 {/* Highlight Summary */}
                 <HighlightSummary highlights={highlights} />
-                
+
                 {/* Rendered content */}
                 <div dangerouslySetInnerHTML={{ __html: renderedHtml }} />
               </div>
-              
-              {/* Inject theme CSS for live preview */}
-              <style dangerouslySetInnerHTML={{ 
-                __html: currentTheme[dark ? "dark" : "light"] 
-              }} />
+
+              {/* Inject theme CSS scoped to preview pane */}
+              <style
+                dangerouslySetInnerHTML={{
+                  __html: scopeThemeCSS(currentTheme[dark ? "dark" : "light"]),
+                }}
+              />
             </div>
           )}
         </div>
@@ -1841,7 +1609,7 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
               <TooltipContent>Preview only ({modKey}+3)</TooltipContent>
             </Tooltip>
           </div>
-          
+
           <Dialog
             open={showUrlInput}
             onOpenChange={(open: boolean) => {
@@ -1897,29 +1665,6 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
               </div>
             </DialogContent>
           </Dialog>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setShowThemeInput(!showThemeInput);
-              if (showThemeInput) setThemeUrl("");
-            }}
-          >
-            <Palette className="size-3.5" />
-            Theme
-          </Button>
-          {activeThemeName && (
-            <>
-              <span className="text-xs text-muted-foreground">
-                Active: {activeThemeName}
-              </span>
-              <Button variant="ghost" size="xs" onClick={resetTheme}>
-                <X className="size-3" />
-                Reset
-              </Button>
-            </>
-          )}
-
           <div className="flex-1" />
 
           <span className="text-xs text-muted-foreground">
@@ -1935,49 +1680,32 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
           </span>
         </footer>
 
-        {/* Theme input */}
-        {showThemeInput && (
-          <div className="flex items-center gap-2 border-t bg-muted/30 px-4 py-2 sm:px-6 no-print">
-            <Button variant="outline" size="sm" asChild>
-              <a
-                href="https://tweakcn.com/editor/theme"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <ExternalLink className="size-3.5" />
-                Browse
-              </a>
-            </Button>
-            <Input
-              value={themeUrl}
-              onChange={(e) => setThemeUrl(e.target.value)}
-              placeholder="Paste theme JSON URL..."
-              onKeyDown={(e) => e.key === "Enter" && applyThemeFromUrl()}
-              className="flex-1"
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={applyThemeFromUrl}
-              disabled={themeLoading}
-            >
-              {themeLoading ? "Loading..." : "Apply"}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={resetTheme}>
-              Reset
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setShowThemeInput(false);
-                setThemeUrl("");
-              }}
-            >
-              <X className="size-3.5" />
-            </Button>
-          </div>
-        )}
+        {/* TOC Sheet */}
+        <Sheet open={showToc} onOpenChange={setShowToc}>
+          <SheetContent side="left" className="flex flex-col">
+            <SheetHeader>
+              <SheetTitle>Table of Contents</SheetTitle>
+              <SheetDescription>
+                {toc.length} heading{toc.length !== 1 ? "s" : ""}
+              </SheetDescription>
+            </SheetHeader>
+            <nav className="flex-1 overflow-y-auto -mx-2 px-2 space-y-0.5">
+              {toc.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    scrollToHeading(item.id);
+                    setShowToc(false);
+                  }}
+                  className="block w-full rounded-md px-3 py-2 text-left text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  style={{ paddingLeft: `${(item.level - 1) * 16 + 12}px` }}
+                >
+                  {item.text}
+                </button>
+              ))}
+            </nav>
+          </SheetContent>
+        </Sheet>
 
         {/* Documents Sheet */}
         <Sheet open={showDocSheet} onOpenChange={setShowDocSheet}>
@@ -2002,7 +1730,11 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                   <p className="text-sm text-muted-foreground">
                     No documents yet
                   </p>
-                  <Button variant="outline" size="sm" onClick={createNewDocument}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={createNewDocument}
+                  >
                     <Plus className="size-3.5" />
                     Create your first document
                   </Button>
@@ -2088,96 +1820,7 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
           </AlertDialogContent>
         </AlertDialog>
 
-        {/* Feature 4: Share dialog with password/TTL */}
-        <Dialog open={showShareDialog} onOpenChange={setShowShareDialog}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Share with Options</DialogTitle>
-              <DialogDescription>
-                Add optional password protection and expiry time.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="share-password">Password (optional)</Label>
-                <Input
-                  id="share-password"
-                  type="password"
-                  placeholder="Leave empty for no protection"
-                  value={sharePassword}
-                  onChange={(e) => setSharePassword(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="share-ttl">Expires</Label>
-                <Select value={shareTTL} onValueChange={(v) => setShareTTL(v as TTLOption)}>
-                  <SelectTrigger id="share-ttl">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Never</SelectItem>
-                    <SelectItem value="1h">1 hour</SelectItem>
-                    <SelectItem value="24h">24 hours</SelectItem>
-                    <SelectItem value="7d">7 days</SelectItem>
-                    <SelectItem value="30d">30 days</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="ghost" onClick={() => setShowShareDialog(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={createProtectedShare}>
-                  Create Share Link
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
 
-        {/* Feature 4: Password prompt dialog */}
-        <Dialog open={pendingPasswordPrompt !== null} onOpenChange={(open) => {
-          if (!open) {
-            setPendingPasswordPrompt(null);
-            setPasswordInput("");
-            window.history.replaceState(null, '', window.location.pathname);
-          }
-        }}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Password Required</DialogTitle>
-              <DialogDescription>
-                This document is password protected. Enter the password to view it.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <Input
-                type="password"
-                placeholder="Enter password"
-                value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    attemptPasswordDecode();
-                  }
-                }}
-                autoFocus
-              />
-              <div className="flex justify-end gap-2">
-                <Button variant="ghost" onClick={() => {
-                  setPendingPasswordPrompt(null);
-                  setPasswordInput("");
-                  window.history.replaceState(null, '', window.location.pathname);
-                }}>
-                  Cancel
-                </Button>
-                <Button onClick={attemptPasswordDecode}>
-                  Unlock
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
 
         {/* Keyboard shortcuts dialog */}
         <Dialog open={showShortcuts} onOpenChange={setShowShortcuts}>
@@ -2193,12 +1836,6 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                 <span>Save to browser</span>
                 <kbd className="rounded bg-muted px-2 py-1 font-mono text-xs">
                   {modKey}+S
-                </kbd>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span>Quick share</span>
-                <kbd className="rounded bg-muted px-2 py-1 font-mono text-xs">
-                  {modKey}+Shift+S
                 </kbd>
               </div>
               <div className="flex items-center justify-between text-sm">
@@ -2257,7 +1894,13 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
           <HighlightToolbar
             position={highlightToolbar.position}
             onHighlight={addHighlight}
-            onClose={() => setHighlightToolbar({ visible: false, position: { x: 0, y: 0 }, selection: null })}
+            onClose={() =>
+              setHighlightToolbar({
+                visible: false,
+                position: { x: 0, y: 0 },
+                selection: null,
+              })
+            }
           />
         )}
 
