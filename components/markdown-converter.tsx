@@ -61,6 +61,7 @@ import {
   Plus,
   List,
   HelpCircle,
+  Info,
   ArrowUpDown,
   Columns,
   Edit,
@@ -144,15 +145,11 @@ function scopeThemeCSS(css: string): string {
   return css.replace(
     /([^{}@][^{}]*?)(\{)/g,
     (_match, selectors: string, brace: string) => {
-      const scoped = selectors
-        .split(",")
-        .map(scopeSelector)
-        .join(", ");
+      const scoped = selectors.split(",").map(scopeSelector).join(", ");
       return scoped + brace;
     },
   );
 }
-
 
 function formatDate(d: unknown): string {
   if (!d) return "";
@@ -669,7 +666,6 @@ export default function MarkdownConverter() {
         copyHTML();
       }
 
-
       // Cmd/Ctrl+D - Download HTML
       if (isMod && e.key === "d") {
         e.preventDefault();
@@ -774,6 +770,10 @@ export default function MarkdownConverter() {
   function saveCurrentDocument() {
     if (!activeDocId) return;
     setDocuments((prev) => {
+      const existing = prev.find((d) => d.id === activeDocId);
+      if (existing && existing.content === input) {
+        return prev;
+      }
       const updated = prev.map((doc) =>
         doc.id === activeDocId
           ? {
@@ -1121,7 +1121,6 @@ ${hasMermaid ? MERMAID_SCRIPT : ""}
     reader.readAsText(file);
   }
 
-
   function scrollToHeading(id: string) {
     const preview = previewRef.current;
     if (!preview) return;
@@ -1177,10 +1176,21 @@ ${hasMermaid ? MERMAID_SCRIPT : ""}
           <div className="absolute inset-x-0 bottom-0 h-px bg-linear-to-r from-transparent via-primary/30 to-transparent" />
           <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4">
             <div className="flex flex-col gap-0.5">
-              <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
-                Sparkdown
+              <h1 className="flex items-center gap-1.5 text-xl font-bold font-mono tracking-tight sm:text-2xl">
+                SPARK
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="1em"
+                  height="1em"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    fill="currentColor"
+                    d="M9 4h6v8h4.84L12 19.84L4.16 12H9z"
+                  />
+                </svg>
               </h1>
-              <p className="text-[13px] leading-snug text-muted-foreground">
+              <p className="text-[13px] font-mono leading-snug text-muted-foreground">
                 Write markdown. Preview, theme, and publish.
               </p>
             </div>
@@ -1239,7 +1249,7 @@ ${hasMermaid ? MERMAID_SCRIPT : ""}
                 paneLayout === "editor-only" ? "flex-1" : "flex-1"
               }`}
             >
-              <div className="flex h-10 items-center justify-between border-b bg-muted text-muted-foreground px-4 no-print">
+              <div className="flex h-10 items-center justify-between border-b bg-muted text-muted-foreground px-2 no-print">
                 <div className="flex items-center gap-1">
                   <Button
                     variant="ghost"
@@ -1247,9 +1257,7 @@ ${hasMermaid ? MERMAID_SCRIPT : ""}
                     onClick={() => setShowDocSheet(true)}
                   >
                     <FileText className="size-3" />
-                    <span className="hidden sm:inline">
-                      {activeDoc ? activeDoc.title : "Documents"}
-                    </span>
+                    Documents
                   </Button>
                 </div>
                 <div className="flex items-center gap-1">
@@ -1263,51 +1271,6 @@ ${hasMermaid ? MERMAID_SCRIPT : ""}
                     <TooltipContent>Save ({modKey}+S)</TooltipContent>
                   </Tooltip>
 
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => {
-                          navigator.clipboard
-                            .writeText(input)
-                            .then(() => toast("Markdown copied to clipboard"));
-                        }}
-                      >
-                        <Copy className="size-3" />
-                        <span className="hidden sm:inline">Copy MD</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Copy raw markdown</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => {
-                          const title =
-                            extractTitle()
-                              .replace(/[^a-zA-Z0-9-_ ]/g, "")
-                              .trim() || "document";
-                          const blob = new Blob([input], {
-                            type: "text/markdown",
-                          });
-                          const url = URL.createObjectURL(blob);
-                          const a = document.createElement("a");
-                          a.href = url;
-                          a.download = `${title}.md`;
-                          a.click();
-                          URL.revokeObjectURL(url);
-                          toast(`Downloaded ${title}.md`);
-                        }}
-                      >
-                        <Download className="size-3" />
-                        <span className="hidden sm:inline">Download MD</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Download as .md file</TooltipContent>
-                  </Tooltip>
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
                       <Button variant="ghost" size="xs">
@@ -1339,6 +1302,10 @@ ${hasMermaid ? MERMAID_SCRIPT : ""}
 
               {/* Word/Char/Line count bar */}
               <div className="flex items-center gap-3 border-b bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground no-print">
+                <span className="truncate font-medium text-foreground">
+                  {extractTitle()}
+                </span>
+                <span>·</span>
                 <span>{wordCount} words</span>
                 <span>·</span>
                 <span>{charCount} chars</span>
@@ -1361,6 +1328,12 @@ ${hasMermaid ? MERMAID_SCRIPT : ""}
                   ref={editorRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Tab") {
+                      e.preventDefault();
+                      document.execCommand("insertText", false, "  ");
+                    }
+                  }}
                   placeholder={`# Hello World\n\nStart typing your markdown here...\n\n\`\`\`javascript\nfunction hello() {\n  console.log('Syntax highlighting!');\n}\n\`\`\``}
                   className="h-full w-full resize-none overflow-y-auto bg-transparent p-4 font-mono text-sm outline-none placeholder:text-muted-foreground/50"
                   spellCheck={false}
@@ -1462,29 +1435,8 @@ ${hasMermaid ? MERMAID_SCRIPT : ""}
 
               {/* Preview subnav */}
               <div className="flex items-center gap-3 border-b bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground no-print">
-                {frontmatterData && (
-                  <button
-                    onClick={() => setShowFrontmatter(!showFrontmatter)}
-                    className="flex items-center gap-1 hover:text-foreground transition-colors"
-                  >
-                    <FileText className="size-3" />
-                    Details {showFrontmatter ? "▾" : "▸"}
-                  </button>
-                )}
-                {toc.length >= 2 && (
-                  <>
-                    {frontmatterData && <span>·</span>}
-                    <button
-                      onClick={() => setShowToc(true)}
-                      className="flex items-center gap-1 hover:text-foreground transition-colors"
-                    >
-                      <List className="size-3" />
-                      TOC
-                    </button>
-                  </>
-                )}
                 <Select value={selectedTheme} onValueChange={changeTheme}>
-                  <SelectTrigger className="ml-auto h-6 w-28 text-xs">
+                  <SelectTrigger className="h-6 w-28 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1499,49 +1451,107 @@ ${hasMermaid ? MERMAID_SCRIPT : ""}
                     ))}
                   </SelectContent>
                 </Select>
+                <div className="ml-auto flex items-center gap-3">
+                  {frontmatterData && (
+                    <button
+                      onClick={() => setShowFrontmatter(true)}
+                      className="flex items-center gap-1 hover:text-foreground transition-colors"
+                    >
+                      <Info className="size-3" />
+                      Details
+                    </button>
+                  )}
+                  {toc.length >= 2 && (
+                    <>
+                      {frontmatterData && <span>·</span>}
+                      <button
+                        onClick={() => setShowToc(true)}
+                        className="flex items-center gap-1 hover:text-foreground transition-colors"
+                      >
+                        <List className="size-3" />
+                        Table of Contents
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
 
-              {/* Frontmatter card */}
-              {frontmatterData && showFrontmatter && (
-                <div className="border-b bg-muted/30 px-4 py-3 no-print">
-                  <div className="space-y-1.5">
-                    {frontmatterData.title && (
-                      <h2 className="text-base font-semibold">
-                        {String(frontmatterData.title)}
-                      </h2>
-                    )}
-                    {frontmatterData.author && (
-                      <p className="text-sm">
-                        {String(frontmatterData.author)}
-                      </p>
-                    )}
-                    {(frontmatterData.pubDate || frontmatterData.date) && (
-                      <p className="text-sm">
-                        {formatDate(
-                          frontmatterData.pubDate || frontmatterData.date,
-                        )}
-                      </p>
-                    )}
-                    {frontmatterData.description && (
-                      <p className="text-sm text-muted-foreground">
+              {/* Frontmatter dialog */}
+              <Dialog open={showFrontmatter} onOpenChange={setShowFrontmatter}>
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>
+                      {frontmatterData?.title
+                        ? String(frontmatterData.title)
+                        : "Document Details"}
+                    </DialogTitle>
+                    {frontmatterData?.description && (
+                      <DialogDescription>
                         {String(frontmatterData.description)}
-                      </p>
+                      </DialogDescription>
                     )}
-                    {Array.isArray(frontmatterData.tags) && (
-                      <div className="flex flex-wrap gap-1">
-                        {(frontmatterData.tags as string[]).map((tag) => (
-                          <span
-                            key={tag}
-                            className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
-                          >
-                            {tag}
+                  </DialogHeader>
+                  {frontmatterData && (
+                    <div className="space-y-3">
+                      {frontmatterData.author && (
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className="font-medium text-muted-foreground">
+                            Author
                           </span>
+                          <span>{String(frontmatterData.author)}</span>
+                        </div>
+                      )}
+                      {(frontmatterData.pubDate || frontmatterData.date) && (
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className="font-medium text-muted-foreground">
+                            Date
+                          </span>
+                          <span>
+                            {formatDate(
+                              frontmatterData.pubDate || frontmatterData.date,
+                            )}
+                          </span>
+                        </div>
+                      )}
+                      {Array.isArray(frontmatterData.tags) && (
+                        <div className="space-y-1.5">
+                          <span className="text-sm font-medium text-muted-foreground">
+                            Tags
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {(frontmatterData.tags as string[]).map((tag) => (
+                              <span
+                                key={tag}
+                                className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary"
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {Object.entries(frontmatterData)
+                        .filter(
+                          ([key]) =>
+                            !["title", "author", "pubDate", "date", "description", "tags"].includes(key),
+                        )
+                        .map(([key, value]) => (
+                          <div key={key} className="flex items-center gap-2 text-sm">
+                            <span className="font-medium text-muted-foreground capitalize">
+                              {key}
+                            </span>
+                            <span>{String(value)}</span>
+                          </div>
                         ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
+                    </div>
+                  )}
+                  <DialogClose asChild>
+                    <Button variant="outline" className="mt-2">
+                      Close
+                    </Button>
+                  </DialogClose>
+                </DialogContent>
+              </Dialog>
 
               {/* HTML preview */}
               <div
@@ -1607,7 +1617,6 @@ ${hasMermaid ? MERMAID_SCRIPT : ""}
             </Tooltip>
           </div>
 
-
           <div className="flex-1" />
 
           <span className="text-xs text-muted-foreground">
@@ -1625,7 +1634,7 @@ ${hasMermaid ? MERMAID_SCRIPT : ""}
 
         {/* TOC Sheet */}
         <Sheet open={showToc} onOpenChange={setShowToc}>
-          <SheetContent side="left" className="flex flex-col">
+          <SheetContent side="right" className="flex flex-col">
             <SheetHeader>
               <SheetTitle>Table of Contents</SheetTitle>
               <SheetDescription>
@@ -1763,8 +1772,6 @@ ${hasMermaid ? MERMAID_SCRIPT : ""}
           </AlertDialogContent>
         </AlertDialog>
 
-
-
         {/* Keyboard shortcuts dialog */}
         <Dialog open={showShortcuts} onOpenChange={setShowShortcuts}>
           <DialogContent className="sm:max-w-md">
@@ -1817,8 +1824,6 @@ ${hasMermaid ? MERMAID_SCRIPT : ""}
                   {modKey}+3
                 </kbd>
               </div>
-
-
             </div>
             <DialogClose asChild>
               <Button variant="outline" className="mt-2">
