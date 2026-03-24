@@ -59,7 +59,10 @@ import {
   List,
   HelpCircle,
   ArrowUpDown,
+  Share2,
+  Check,
 } from "lucide-react";
+import { compressToEncodedURIComponent, decompressFromEncodedURIComponent } from "lz-string";
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -301,6 +304,7 @@ export default function MarkdownConverter() {
   const [showToc, setShowToc] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [scrollSync, setScrollSync] = useState(true);
+  const [shareSuccess, setShareSuccess] = useState(false);
 
   const highlighterRef = useRef<Highlighter | null>(null);
   const renderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -518,6 +522,24 @@ export default function MarkdownConverter() {
       highlighterRef.current = h;
     });
 
+    // Check for shared document in URL hash
+    const hash = window.location.hash;
+    if (hash.startsWith('#doc=')) {
+      try {
+        const compressed = hash.slice(5); // Remove '#doc='
+        const decompressed = decompressFromEncodedURIComponent(compressed);
+        if (decompressed) {
+          setInput(decompressed);
+          // Clear hash from URL after loading
+          window.history.replaceState(null, '', window.location.pathname);
+          toast("Loaded shared document");
+        }
+      } catch (err) {
+        console.error('Failed to load shared document:', err);
+        toast.error("Failed to load shared document");
+      }
+    }
+
     const mql = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = (e: MediaQueryListEvent) => {
       if (!localStorage.getItem("theme")) {
@@ -545,6 +567,12 @@ export default function MarkdownConverter() {
       if (isMod && e.shiftKey && e.key === "C") {
         e.preventDefault();
         copyHTML();
+      }
+      
+      // Cmd/Ctrl+Shift+S - Share
+      if (isMod && e.shiftKey && e.key === "S") {
+        e.preventDefault();
+        shareDocument();
       }
       
       // Cmd/Ctrl+K - Toggle URL import
@@ -936,6 +964,50 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
     }
   }
 
+  function shareDocument() {
+    const content = input.trim();
+    
+    if (!content) {
+      toast("Nothing to share");
+      return;
+    }
+    
+    try {
+      // Compress the markdown content
+      const compressed = compressToEncodedURIComponent(content);
+      
+      // Build the share URL
+      const baseUrl = `${window.location.origin}${window.location.pathname}`;
+      const shareUrl = `${baseUrl}#doc=${compressed}`;
+      
+      // Check size limits
+      if (shareUrl.length > 12000) {
+        toast.error("Content too large for URL sharing. Try shortening to under ~1,500 words.");
+        return;
+      }
+      
+      if (shareUrl.length > 8000) {
+        toast("⚠️ Share link is large (~" + Math.floor(shareUrl.length / 1000) + "KB). May not work in all browsers.");
+      }
+      
+      // Copy to clipboard
+      navigator.clipboard.writeText(shareUrl).then(() => {
+        setShareSuccess(true);
+        toast("Share link copied!");
+        
+        // Reset the success state after 2 seconds
+        setTimeout(() => {
+          setShareSuccess(false);
+        }, 2000);
+      }).catch(() => {
+        toast.error("Failed to copy to clipboard");
+      });
+    } catch (err) {
+      console.error('Share error:', err);
+      toast.error("Failed to create share link");
+    }
+  }
+
   const activeDoc = documents.find((d) => d.id === activeDocId);
 
   if (!mounted) {
@@ -1014,6 +1086,24 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                 </Button>
               </div>
               <div className="flex items-center gap-1">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button 
+                      variant="ghost" 
+                      size="xs" 
+                      onClick={shareDocument}
+                      className="transition-all"
+                    >
+                      {shareSuccess ? (
+                        <Check className="size-3 text-green-600" />
+                      ) : (
+                        <Share2 className="size-3" />
+                      )}
+                      <span className="hidden sm:inline">Share</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Share ({modKey}+Shift+S)</TooltipContent>
+                </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button variant="ghost" size="xs" onClick={saveNow}>
@@ -1534,6 +1624,12 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
                 <span>Save to browser</span>
                 <kbd className="rounded bg-muted px-2 py-1 font-mono text-xs">
                   {modKey}+S
+                </kbd>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span>Share document</span>
+                <kbd className="rounded bg-muted px-2 py-1 font-mono text-xs">
+                  {modKey}+Shift+S
                 </kbd>
               </div>
               <div className="flex items-center justify-between text-sm">
