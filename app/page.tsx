@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import MarkdownConverter from "@/components/markdown-converter";
 
 export const metadata: Metadata = {
-  title: "Markdown → HTML",
+  title: "Sparkdown — Markdown Editor & Publisher",
   description:
-    "Markdown on the left, styled HTML on the right. Copy to clipboard or download a .html file. Browser-only: no server, no tracking.",
+    "Write markdown, preview styled HTML, export to PDF. Themes, syntax highlighting, diagrams, math, sharing. Browser-only: no server, no tracking.",
 };
 
 export default function Page() {

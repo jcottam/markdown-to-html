@@ -1,5 +1,5 @@
 {
-  "name": "markdown-to-html",
+  "name": "sparkdown",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -45,5 +45,6 @@
     "shadcn": "^4.1.0",
     "tailwindcss": "^4",
     "typescript": "^5"
-  }
+  },
+  "description": "Markdown editor and publisher — write, preview, theme, and publish"
 }

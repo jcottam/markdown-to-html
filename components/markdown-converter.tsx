@@ -1158,10 +1158,10 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
           <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4">
             <div className="flex flex-col gap-0.5">
               <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
-                Markdown to HTML Converter
+                Sparkdown
               </h1>
               <p className="text-[13px] leading-snug text-muted-foreground">
-                Paste markdown, get styled HTML. Copy or download.
+                Write markdown. Preview, theme, and publish.
               </p>
             </div>
             <div className="flex items-center gap-1">
@@ -1175,7 +1175,7 @@ ${hasMermaid ? MERMAID_SCRIPT : ''}
               </Tooltip>
               <Button variant="ghost" size="icon" asChild>
                 <a
-                  href="https://github.com/jcottam/markdown-to-html"
+                  href="https://github.com/jcottam/sparkdown"
                   target="_blank"
                   rel="noopener noreferrer"
                 >

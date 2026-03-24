@@ -23,7 +23,7 @@ const firaCode = Fira_Code({
 });
 
 export const metadata: Metadata = {
-  title: "Markdown → HTML",
+  title: "Sparkdown — Markdown Editor & Publisher",
   description:
     "Markdown on the left, styled HTML on the right. Copy to clipboard or download a .html file. Browser-only: no server, no tracking.",
   icons: {

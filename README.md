@@ -1,39 +1,41 @@
-# Markdown → HTML
+# Sparkdown
 
-Markdown on the left, styled HTML on the right. Copy to clipboard or download a `.html` file. Browser-only: no server, no tracking.
+A markdown editor and publisher. Write markdown, preview with themes, export to HTML or PDF, share with encrypted links.
 
-**Live:** [johnryancottam.com/tools/markdown-to-html](https://johnryancottam.com/tools/markdown-to-html)
+**Live:** [johnryancottam.com/tools/markdown-to-html](https://www.johnryancottam.com/tools/markdown-to-html)
 
 ## Features
 
-- **Live preview** — real-time rendering as you type with debounced updates
-- **GitHub-flavored Markdown** — tables, task lists, fenced code blocks, and more (via [marked](https://github.com/markedjs/marked))
-- **Syntax highlighting** — 25+ languages powered by [Shiki](https://shiki.style/) with dual light/dark themes
-- **Frontmatter support** — YAML frontmatter (title, author, date, tags) parsed and displayed via [gray-matter](https://github.com/jonschlinkert/gray-matter)
-- **Copy HTML** — one click to copy a fully self-contained HTML page to your clipboard
-- **Download .html** — save the rendered page as a file
-- **Open full page** — preview in a new browser tab
-- **Import from URL** — fetch markdown from GitHub file URLs, Gists, or raw URLs
-- **Multi-document management** — create, switch, and delete documents stored in browser localStorage
-- **Auto-save** — optional auto-save with manual save and `Cmd+S` / `Ctrl+S` support
-- **Drag-and-drop** — drop `.md` or `.txt` files directly into the editor
-- **Custom themes** — apply themes via JSON URL (compatible with [tweakcn](https://tweakcn.com/editor/theme))
-- **Dark mode** — automatic (system preference) or manual toggle, with theme persistence
-- **Download markdown** — export the raw markdown as a `.md` file
-- **Responsive** — split-pane layout on desktop, stacked on mobile
+- **Live preview** — real-time rendering as you type
+- **5 HTML themes** — GitHub, Minimalist, Brutalist, Gen Z, Academic (light + dark)
+- **Syntax highlighting** — Shiki with GitHub themes, 26+ languages
+- **Frontmatter** — parses YAML frontmatter, renders as metadata card
+- **Mermaid diagrams** — renders diagrams from fenced code blocks
+- **Math/LaTeX** — KaTeX rendering for inline and block math
+- **PDF export** — download styled PDFs (mobile-friendly fallback)
+- **Share links** — compressed URLs with optional password + TTL
+- **Drag & drop** — drop .md files directly into the editor
+- **URL import** — fetch markdown from GitHub, Gist, or any raw URL
+- **Keyboard shortcuts** — full shortcut support with cheat sheet
+- **Scroll sync** — bidirectional proportional scrolling
+- **Layout modes** — split, editor-only, or preview-only
+- **Auto-save** — persist content to localStorage
+- **Table of contents** — auto-generated, clickable headings
+- **Dark mode** — system-aware with manual toggle
+- **Theme loader** — apply shadcn themes from tweakcn.com URLs
+- **Print-friendly** — clean print styles for browser printing
 
 ## Tech Stack
 
-- [Next.js](https://nextjs.org/) 16 (App Router)
-- [React](https://react.dev/) 19
-- [TypeScript](https://www.typescriptlang.org/)
-- [Tailwind CSS](https://tailwindcss.com/) 4
-- [shadcn/ui](https://ui.shadcn.com/) (Dialog, Sheet, AlertDialog, Button, Input)
-- [marked](https://github.com/markedjs/marked) for GFM parsing
-- [Shiki](https://shiki.style/) for syntax highlighting
-- [gray-matter](https://github.com/jonschlinkert/gray-matter) for YAML frontmatter
-- [Lucide React](https://lucide.dev/) for icons
-- [Sonner](https://sonner.emilkowal.dev/) for toast notifications
+- [Next.js 15](https://nextjs.org/) (App Router)
+- [shadcn/ui](https://ui.shadcn.com/) + [Tailwind CSS](https://tailwindcss.com/)
+- [Shiki](https://shiki.matsu.io/) for syntax highlighting
+- [marked](https://github.com/markedjs/marked) for Markdown parsing
+- [gray-matter](https://github.com/jonschlinkert/gray-matter) for frontmatter
+- [Mermaid](https://mermaid.js.org/) for diagrams
+- [KaTeX](https://katex.org/) for math rendering
+- [lz-string](https://github.com/pieroxy/lz-string) for URL compression
+- [crypto-js](https://github.com/brix/crypto-js) for share encryption
 
 ## Development
 
@@ -41,8 +43,6 @@ Markdown on the left, styled HTML on the right. Copy to clipboard or download a 
 pnpm install
 pnpm dev
 ```
-
-Open [http://localhost:3000](http://localhost:3000) to see the app.
 
 ## Build
 
@@ -52,8 +52,6 @@ pnpm build
 
 ## License
 
-[MIT](LICENSE)
-
----
+MIT
 
 Built by [John Ryan Cottam](https://johnryancottam.com)
