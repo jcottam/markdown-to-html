@@ -5,6 +5,8 @@ import { marked } from "marked";
 import matter from "gray-matter";
 import { createHighlighter, type Highlighter } from "shiki";
 import { toast } from "sonner";
+import mermaid from "mermaid";
+import katex from "katex";
 import {
   Dialog,
   DialogClose,
@@ -35,6 +37,12 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Sun,
   Moon,
   Copy,
@@ -48,6 +56,9 @@ import {
   Eye,
   FileText,
   Plus,
+  List,
+  HelpCircle,
+  ArrowUpDown,
 } from "lucide-react";
 
 marked.setOptions({ gfm: true, breaks: true });
@@ -57,6 +68,12 @@ interface SavedDocument {
   title: string;
   content: string;
   updatedAt: number;
+}
+
+interface TocItem {
+  id: string;
+  text: string;
+  level: number;
 }
 
 const SHIKI_LANGS = [
@@ -114,6 +131,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Ar
 .markdown-body ul:has(> li > input[type="checkbox"]) { list-style: none; padding-left: 0; }
 .markdown-body li:has(> input[type="checkbox"]) { display: flex; align-items: baseline; gap: 0.5em; }
 .markdown-body li > input[type="checkbox"] { margin-top: 0.125em; flex-shrink: 0; }
+@media print {
+  body { background: #fff !important; }
+  .markdown-body { max-width: 100%; padding: 0; }
+  @page { margin: 2cm; }
+}
 `,
   dark: `
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 16px; line-height: 1.5; color: #e6edf3; background: #0d1117; }
@@ -140,6 +162,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Ar
 .markdown-body ul:has(> li > input[type="checkbox"]) { list-style: none; padding-left: 0; }
 .markdown-body li:has(> input[type="checkbox"]) { display: flex; align-items: baseline; gap: 0.5em; }
 .markdown-body li > input[type="checkbox"] { margin-top: 0.125em; flex-shrink: 0; }
+@media print {
+  body { background: #fff !important; color: #24292f !important; }
+  .markdown-body { max-width: 100%; padding: 0; color: #24292f !important; }
+  .markdown-body * { color: #24292f !important; }
+  @page { margin: 2cm; }
+}
 `,
 };
 
@@ -150,7 +178,17 @@ const SHIKI_EXPORT_CSS = `
 @media (prefers-color-scheme: dark) {
   .shiki, .shiki span { color: var(--shiki-dark); background: var(--shiki-dark-bg); border-color: #30363d; }
 }
+@media print {
+  .shiki, .shiki span { color: var(--shiki-light) !important; background: var(--shiki-light-bg) !important; }
+}
 `;
+
+const KATEX_CSS = `<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.40/dist/katex.min.css" integrity="sha384-vKruj+a13U8yHIkAyGgK1J3ArTLzrFGBbBc0tDp4ad/EyewESeXE/Iv67Aj8gKZ0" crossorigin="anonymous">`;
+
+const MERMAID_SCRIPT = `<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+</script>`;
 
 function toRawUrl(url: string): string {
   const ghBlob = url.match(/github\.com\/([^/]+)\/([^/]+)\/blob\/(.+)/);
@@ -212,6 +250,35 @@ function extractTitleFromContent(raw: string): string {
   return "Untitled";
 }
 
+function countWords(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function countChars(text: string): number {
+  return text.length;
+}
+
+function countLines(text: string): number {
+  return text.split("\n").length;
+}
+
+function extractToc(markdown: string): TocItem[] {
+  const headings: TocItem[] = [];
+  const lines = markdown.split("\n");
+  
+  lines.forEach((line) => {
+    const match = line.match(/^(#{1,6})\s+(.+)$/);
+    if (match) {
+      const level = match[1].length;
+      const text = match[2].trim();
+      const id = text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+      headings.push({ id, text, level });
+    }
+  });
+  
+  return headings;
+}
+
 export default function MarkdownConverter() {
   const [mounted, setMounted] = useState(false);
   const [input, setInput] = useState("");
@@ -231,10 +298,17 @@ export default function MarkdownConverter() {
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
   const [showDocSheet, setShowDocSheet] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [showToc, setShowToc] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [scrollSync, setScrollSync] = useState(true);
 
   const highlighterRef = useRef<Highlighter | null>(null);
   const renderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const isScrollingFromEditor = useRef(false);
+  const isScrollingFromPreview = useRef(false);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let frontmatterData: Record<string, any> | null = null;
@@ -247,38 +321,109 @@ export default function MarkdownConverter() {
     // no-op
   }
 
+  const toc = extractToc(markdownContent);
+  const wordCount = countWords(input);
+  const charCount = countChars(input);
+  const lineCount = countLines(input);
+
+  const renderMermaid = useCallback(async (html: string): Promise<string> => {
+    const tempDiv = document.createElement("div");
+    tempDiv.innerHTML = html;
+    
+    const mermaidBlocks = tempDiv.querySelectorAll('pre code.language-mermaid');
+    
+    for (let i = 0; i < mermaidBlocks.length; i++) {
+      const block = mermaidBlocks[i];
+      const code = block.textContent || '';
+      
+      try {
+        const { svg } = await mermaid.render(`mermaid-${Date.now()}-${i}`, code);
+        const wrapper = document.createElement('div');
+        wrapper.className = 'mermaid-diagram';
+        wrapper.innerHTML = svg;
+        block.parentElement?.replaceWith(wrapper);
+      } catch (err) {
+        console.error('Mermaid render error:', err);
+        // Keep the original code block on error
+      }
+    }
+    
+    return tempDiv.innerHTML;
+  }, []);
+
+  const renderMath = useCallback((html: string): string => {
+    // Replace block math $$...$$
+    html = html.replace(/\$\$([\s\S]+?)\$\$/g, (match, tex) => {
+      try {
+        return katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false });
+      } catch {
+        return match;
+      }
+    });
+    
+    // Replace inline math $...$
+    html = html.replace(/\$([^$\n]+?)\$/g, (match, tex) => {
+      try {
+        return katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false });
+      } catch {
+        return match;
+      }
+    });
+    
+    return html;
+  }, []);
+
   const renderMarkdown = useCallback(async (content: string) => {
     if (!content) {
       setRenderedHtml("");
       return;
     }
-    const html = await marked.parse(content);
+    
+    let html = await marked.parse(content);
+    
+    // Apply syntax highlighting
     const hl = highlighterRef.current;
-    if (!hl) {
-      setRenderedHtml(html);
-      return;
+    if (hl) {
+      html = html.replace(
+        /<pre><code class="language-(\w+)">([\s\S]*?)<\/code><\/pre>/g,
+        (_: string, lang: string, code: string) => {
+          if (lang === 'mermaid') {
+            // Skip mermaid blocks for now, will handle separately
+            return `<pre><code class="language-mermaid">${code}</code></pre>`;
+          }
+          const decoded = code
+            .replace(/&amp;/g, "&")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'");
+          try {
+            return hl.codeToHtml(decoded, {
+              lang: lang || "text",
+              themes: { light: "github-light", dark: "github-dark" },
+            });
+          } catch {
+            return `<pre><code class="language-${lang}">${code}</code></pre>`;
+          }
+        },
+      );
     }
-    const processed = html.replace(
-      /<pre><code class="language-(\w+)">([\s\S]*?)<\/code><\/pre>/g,
-      (_: string, lang: string, code: string) => {
-        const decoded = code
-          .replace(/&amp;/g, "&")
-          .replace(/&lt;/g, "<")
-          .replace(/&gt;/g, ">")
-          .replace(/&quot;/g, '"')
-          .replace(/&#39;/g, "'");
-        try {
-          return hl.codeToHtml(decoded, {
-            lang: lang || "text",
-            themes: { light: "github-light", dark: "github-dark" },
-          });
-        } catch {
-          return `<pre><code class="language-${lang}">${code}</code></pre>`;
-        }
-      },
-    );
-    setRenderedHtml(processed);
-  }, []);
+    
+    // Apply math rendering
+    html = renderMath(html);
+    
+    // Apply mermaid rendering
+    html = await renderMermaid(html);
+    
+    // Add IDs to headings for TOC links
+    html = html.replace(/<h([1-6])>(.+?)<\/h\1>/g, (match, level, text) => {
+      const plainText = text.replace(/<[^>]+>/g, '');
+      const id = plainText.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+      return `<h${level} id="${id}">${text}</h${level}>`;
+    });
+    
+    setRenderedHtml(html);
+  }, [renderMath, renderMermaid]);
 
   useEffect(() => {
     if (renderTimerRef.current) clearTimeout(renderTimerRef.current);
@@ -311,6 +456,9 @@ export default function MarkdownConverter() {
     } else {
       setDark(window.matchMedia("(prefers-color-scheme: dark)").matches);
     }
+
+    // Initialize mermaid
+    mermaid.initialize({ startOnLoad: false, theme: 'neutral' });
 
     // Load documents with legacy migration
     let docs = readDocuments();
@@ -348,6 +496,9 @@ export default function MarkdownConverter() {
     const savedAutoSave = localStorage.getItem("md-autosave");
     if (savedAutoSave === "true") setAutoSave(true);
 
+    const savedScrollSync = localStorage.getItem("md-scroll-sync");
+    if (savedScrollSync === "false") setScrollSync(false);
+
     const savedThemeName = localStorage.getItem("md-theme-name");
     if (savedThemeName) setActiveThemeName(savedThemeName);
 
@@ -378,19 +529,40 @@ export default function MarkdownConverter() {
     return () => mql.removeEventListener("change", handler);
   }, []);
 
-  // Cmd+S save
+  // Keyboard shortcuts
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+      const isMod = e.metaKey || e.ctrlKey;
+      
+      // Cmd/Ctrl+S - Save
+      if (isMod && e.key === "s") {
         e.preventDefault();
         saveCurrentDocument();
         toast("Saved to browser");
+      }
+      
+      // Cmd/Ctrl+Shift+C - Copy HTML
+      if (isMod && e.shiftKey && e.key === "C") {
+        e.preventDefault();
+        copyHTML();
+      }
+      
+      // Cmd/Ctrl+K - Toggle URL import
+      if (isMod && e.key === "k") {
+        e.preventDefault();
+        setShowUrlInput((prev) => !prev);
+      }
+      
+      // Cmd/Ctrl+D - Download HTML
+      if (isMod && e.key === "d") {
+        e.preventDefault();
+        downloadHTML();
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, activeDocId]);
+  }, [input, activeDocId, renderedHtml, dark]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -402,6 +574,58 @@ export default function MarkdownConverter() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlighterRef.current]);
+
+  // Scroll sync
+  useEffect(() => {
+    if (!scrollSync) return;
+
+    const editor = editorRef.current;
+    const preview = previewRef.current;
+    if (!editor || !preview) return;
+
+    let editorTimeout: ReturnType<typeof setTimeout>;
+    let previewTimeout: ReturnType<typeof setTimeout>;
+
+    const handleEditorScroll = () => {
+      if (isScrollingFromPreview.current) return;
+      
+      clearTimeout(editorTimeout);
+      isScrollingFromEditor.current = true;
+      
+      const scrollPercentage = editor.scrollTop / (editor.scrollHeight - editor.clientHeight);
+      const targetScroll = scrollPercentage * (preview.scrollHeight - preview.clientHeight);
+      preview.scrollTop = targetScroll;
+      
+      editorTimeout = setTimeout(() => {
+        isScrollingFromEditor.current = false;
+      }, 100);
+    };
+
+    const handlePreviewScroll = () => {
+      if (isScrollingFromEditor.current) return;
+      
+      clearTimeout(previewTimeout);
+      isScrollingFromPreview.current = true;
+      
+      const scrollPercentage = preview.scrollTop / (preview.scrollHeight - preview.clientHeight);
+      const targetScroll = scrollPercentage * (editor.scrollHeight - editor.clientHeight);
+      editor.scrollTop = targetScroll;
+      
+      previewTimeout = setTimeout(() => {
+        isScrollingFromPreview.current = false;
+      }, 100);
+    };
+
+    editor.addEventListener('scroll', handleEditorScroll);
+    preview.addEventListener('scroll', handlePreviewScroll);
+
+    return () => {
+      editor.removeEventListener('scroll', handleEditorScroll);
+      preview.removeEventListener('scroll', handlePreviewScroll);
+      clearTimeout(editorTimeout);
+      clearTimeout(previewTimeout);
+    };
+  }, [scrollSync]);
 
   // --- Document helpers ---
 
@@ -508,6 +732,13 @@ export default function MarkdownConverter() {
     }
   }
 
+  function toggleScrollSync() {
+    const next = !scrollSync;
+    setScrollSync(next);
+    localStorage.setItem("md-scroll-sync", String(next));
+    toast(next ? "Scroll sync enabled" : "Scroll sync disabled");
+  }
+
   function saveNow() {
     saveCurrentDocument();
     toast("Saved to browser");
@@ -520,21 +751,32 @@ export default function MarkdownConverter() {
 
   function getFullHTML(): string {
     const currentTheme = GITHUB_THEME[dark ? "dark" : "light"];
+    const hasMermaid = renderedHtml.includes('class="mermaid-diagram"');
+    const hasMath = renderedHtml.includes('class="katex');
+    
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${extractTitle()}</title>
+${hasMath ? KATEX_CSS : ''}
 <style>
 ${currentTheme}
 ${SHIKI_EXPORT_CSS}
+@media print {
+  body { background: #fff !important; color: #24292f !important; }
+  .markdown-body { max-width: 100%; padding: 0; }
+  .markdown-body * { color: inherit; }
+  .no-print { display: none !important; }
+}
 </style>
 </head>
 <body>
 <div class="markdown-body">
 ${renderedHtml}
 </div>
+${hasMermaid ? MERMAID_SCRIPT : ''}
 </body>
 </html>`;
   }
@@ -684,482 +926,643 @@ ${renderedHtml}
     toast("Theme reset to default");
   }
 
+  function scrollToHeading(id: string) {
+    const preview = previewRef.current;
+    if (!preview) return;
+    
+    const heading = preview.querySelector(`#${id}`);
+    if (heading) {
+      heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
   const activeDoc = documents.find((d) => d.id === activeDocId);
 
   if (!mounted) {
     return <div className="flex h-screen flex-col overflow-hidden" />;
   }
 
+  const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+  const modKey = isMac ? '⌘' : 'Ctrl';
+
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
-      {/* Header */}
-      <header className="relative border-b border-border/60 bg-linear-to-r from-primary/4 via-transparent to-accent/6">
-        <div className="absolute inset-x-0 bottom-0 h-px bg-linear-to-r from-transparent via-primary/30 to-transparent" />
-        <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4">
-          <div className="flex flex-col gap-0.5">
-            <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
-              Markdown to HTML Converter
-            </h1>
-            <p className="text-[13px] leading-snug text-muted-foreground">
-              Paste markdown, get styled HTML. Copy or download.
-            </p>
-          </div>
-          <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" asChild>
-              <a
-                href="https://github.com/jcottam/markdown-to-html"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <svg
-                  viewBox="0 0 16 16"
-                  className="size-4 fill-current"
-                  aria-label="GitHub"
-                >
-                  <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
-                </svg>
-              </a>
-            </Button>
-            <Button variant="ghost" size="icon" onClick={toggleTheme}>
-              {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-            </Button>
-          </div>
-        </div>
-      </header>
-
-      {/* Main content */}
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        {/* Editor pane */}
-        <div className="flex min-h-0 flex-1 flex-col border-b md:border-b-0 md:border-r">
-          <div className="flex h-10 items-center justify-between border-b bg-muted text-muted-foreground px-4">
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => setShowDocSheet(true)}
-              >
-                <FileText className="size-3" />
-                <span className="hidden sm:inline">
-                  {activeDoc ? activeDoc.title : "Documents"}
-                </span>
-              </Button>
+    <TooltipProvider>
+      <div className="flex h-screen flex-col overflow-hidden">
+        {/* Header */}
+        <header className="relative border-b border-border/60 bg-linear-to-r from-primary/4 via-transparent to-accent/6 no-print">
+          <div className="absolute inset-x-0 bottom-0 h-px bg-linear-to-r from-transparent via-primary/30 to-transparent" />
+          <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4">
+            <div className="flex flex-col gap-0.5">
+              <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
+                Markdown to HTML Converter
+              </h1>
+              <p className="text-[13px] leading-snug text-muted-foreground">
+                Paste markdown, get styled HTML. Copy or download.
+              </p>
             </div>
             <div className="flex items-center gap-1">
-              <Button variant="ghost" size="xs" onClick={saveNow}>
-                <Save className="size-3" />
-                <span className="hidden sm:inline">Save</span>
-              </Button>
-              <Button
-                variant={autoSave ? "default" : "ghost"}
-                size="xs"
-                onClick={toggleAutoSave}
-              >
-                <Save className="size-3" />
-                <span className="hidden sm:inline">
-                  {autoSave ? "Auto" : "Auto-save"}
-                </span>
-              </Button>
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => {
-                  navigator.clipboard
-                    .writeText(input)
-                    .then(() => toast("Markdown copied to clipboard"));
-                }}
-              >
-                <Copy className="size-3" />
-                <span className="hidden sm:inline">Copy</span>
-              </Button>
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => {
-                  const title = extractTitle().replace(/[^a-zA-Z0-9-_ ]/g, "").trim() || "document";
-                  const blob = new Blob([input], { type: "text/markdown" });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download = `${title}.md`;
-                  a.click();
-                  URL.revokeObjectURL(url);
-                  toast(`Downloaded ${title}.md`);
-                }}
-              >
-                <Download className="size-3" />
-                <span className="hidden sm:inline">Download</span>
-              </Button>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="ghost" size="xs">
-                    <Trash2 className="size-3" />
-                    <span className="hidden sm:inline">Clear</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={() => setShowShortcuts(true)}>
+                    <HelpCircle className="size-4" />
                   </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Clear document?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This will erase all content in the current document. This
-                      action cannot be undone.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction
-                      variant="destructive"
-                      onClick={clearAll}
-                    >
-                      Clear
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+                </TooltipTrigger>
+                <TooltipContent>Keyboard shortcuts</TooltipContent>
+              </Tooltip>
+              <Button variant="ghost" size="icon" asChild>
+                <a
+                  href="https://github.com/jcottam/markdown-to-html"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <svg
+                    viewBox="0 0 16 16"
+                    className="size-4 fill-current"
+                    aria-label="GitHub"
+                  >
+                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
+                  </svg>
+                </a>
+              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={toggleTheme}>
+                    {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{dark ? "Light mode" : "Dark mode"}</TooltipContent>
+              </Tooltip>
             </div>
           </div>
-          <div
-            className="relative min-h-0 flex-1"
-            onDragOver={onDragOver}
-            onDragLeave={onDragLeave}
-            onDrop={onDrop}
-          >
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={`# Hello World\n\nStart typing your markdown here...\n\n\`\`\`javascript\nfunction hello() {\n  console.log('Syntax highlighting!');\n}\n\`\`\``}
-              className="h-full w-full resize-none overflow-y-auto bg-transparent p-4 font-mono text-sm outline-none placeholder:text-muted-foreground/50"
-              spellCheck={false}
-            />
-            {dragging && (
-              <div className="absolute inset-0 flex items-center justify-center bg-primary/10 backdrop-blur-sm">
-                <p className="text-lg font-medium text-primary">
-                  Drop .md file here
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
+        </header>
 
-        {/* Preview pane */}
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex h-10 items-center justify-between border-b bg-muted text-muted-foreground px-4">
-            <div className="flex items-center gap-2">
-              <Eye className="size-3.5" />
-              <span className="text-sm font-medium">Preview</span>
-            </div>
-            <div className="flex items-center gap-1">
-              {frontmatterData && (
+        {/* Main content */}
+        <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+          {/* Editor pane */}
+          <div className="flex min-h-0 flex-1 flex-col border-b md:border-b-0 md:border-r">
+            <div className="flex h-10 items-center justify-between border-b bg-muted text-muted-foreground px-4 no-print">
+              <div className="flex items-center gap-1">
                 <Button
                   variant="ghost"
                   size="xs"
-                  onClick={() => setShowFrontmatter(!showFrontmatter)}
+                  onClick={() => setShowDocSheet(true)}
                 >
-                  Frontmatter {showFrontmatter ? "▾" : "▸"}
+                  <FileText className="size-3" />
+                  <span className="hidden sm:inline">
+                    {activeDoc ? activeDoc.title : "Documents"}
+                  </span>
                 </Button>
+              </div>
+              <div className="flex items-center gap-1">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="xs" onClick={saveNow}>
+                      <Save className="size-3" />
+                      <span className="hidden sm:inline">Save</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Save ({modKey}+S)</TooltipContent>
+                </Tooltip>
+                <Button
+                  variant={autoSave ? "default" : "ghost"}
+                  size="xs"
+                  onClick={toggleAutoSave}
+                >
+                  <Save className="size-3" />
+                  <span className="hidden sm:inline">
+                    {autoSave ? "Auto" : "Auto-save"}
+                  </span>
+                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => {
+                        navigator.clipboard
+                          .writeText(input)
+                          .then(() => toast("Markdown copied to clipboard"));
+                      }}
+                    >
+                      <Copy className="size-3" />
+                      <span className="hidden sm:inline">Copy MD</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Copy raw markdown</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => {
+                        const title = extractTitle().replace(/[^a-zA-Z0-9-_ ]/g, "").trim() || "document";
+                        const blob = new Blob([input], { type: "text/markdown" });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = `${title}.md`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                        toast(`Downloaded ${title}.md`);
+                      }}
+                    >
+                      <Download className="size-3" />
+                      <span className="hidden sm:inline">Download MD</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Download as .md file</TooltipContent>
+                </Tooltip>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="ghost" size="xs">
+                      <Trash2 className="size-3" />
+                      <span className="hidden sm:inline">Clear</span>
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Clear document?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will erase all content in the current document. This
+                        action cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        variant="destructive"
+                        onClick={clearAll}
+                      >
+                        Clear
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            </div>
+            
+            {/* Word/Char/Line count bar */}
+            <div className="flex items-center gap-3 border-b bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground no-print">
+              <span>{wordCount} words</span>
+              <span>·</span>
+              <span>{charCount} chars</span>
+              <span>·</span>
+              <span>{lineCount} lines</span>
+            </div>
+            
+            <div
+              className="relative min-h-0 flex-1"
+              onDragOver={onDragOver}
+              onDragLeave={onDragLeave}
+              onDrop={onDrop}
+            >
+              <textarea
+                ref={editorRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder={`# Hello World\n\nStart typing your markdown here...\n\n\`\`\`javascript\nfunction hello() {\n  console.log('Syntax highlighting!');\n}\n\`\`\``}
+                className="h-full w-full resize-none overflow-y-auto bg-transparent p-4 font-mono text-sm outline-none placeholder:text-muted-foreground/50"
+                spellCheck={false}
+              />
+              {dragging && (
+                <div className="absolute inset-0 flex items-center justify-center bg-primary/10 backdrop-blur-sm">
+                  <p className="text-lg font-medium text-primary">
+                    Drop .md file here
+                  </p>
+                </div>
               )}
-              <Button variant="ghost" size="xs" onClick={copyHTML}>
-                <Copy className="size-3" />
-                <span className="hidden sm:inline">Copy</span>
-              </Button>
-              <Button variant="ghost" size="xs" onClick={downloadHTML}>
-                <Download className="size-3" />
-                <span className="hidden sm:inline">Download</span>
-              </Button>
-              <Button variant="ghost" size="xs" onClick={openPreview}>
-                <ExternalLink className="size-3" />
-                <span className="hidden sm:inline">Open Full Page</span>
-              </Button>
             </div>
           </div>
 
-          {/* Frontmatter card */}
-          {frontmatterData && showFrontmatter && (
-            <div className="border-b bg-muted/30 px-4 py-3">
-              <div className="space-y-1.5">
-                {frontmatterData.title && (
-                  <h2 className="text-base font-semibold">
-                    {String(frontmatterData.title)}
-                  </h2>
-                )}
-                {frontmatterData.author && (
-                  <p className="text-sm">{String(frontmatterData.author)}</p>
-                )}
-                {(frontmatterData.pubDate || frontmatterData.date) && (
-                  <p className="text-sm">
-                    {formatDate(
-                      frontmatterData.pubDate || frontmatterData.date,
-                    )}
-                  </p>
-                )}
-                {frontmatterData.description && (
-                  <p className="text-sm text-muted-foreground">
-                    {String(frontmatterData.description)}
-                  </p>
-                )}
-                {Array.isArray(frontmatterData.tags) && (
-                  <div className="flex flex-wrap gap-1">
-                    {(frontmatterData.tags as string[]).map((tag) => (
-                      <span
-                        key={tag}
-                        className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
+          {/* Preview pane */}
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex h-10 items-center justify-between border-b bg-muted text-muted-foreground px-4 no-print">
+              <div className="flex items-center gap-2">
+                <Eye className="size-3.5" />
+                <span className="text-sm font-medium">Preview</span>
               </div>
-            </div>
-          )}
-
-          {/* HTML preview */}
-          <div
-            className="markdown-preview min-h-0 flex-1 overflow-y-auto p-4"
-            dangerouslySetInnerHTML={{ __html: renderedHtml }}
-          />
-        </div>
-      </div>
-
-      {/* Footer toolbar */}
-      <footer className="flex flex-wrap items-center gap-2 border-t px-4 py-2 sm:px-6">
-        <Dialog
-          open={showUrlInput}
-          onOpenChange={(open: boolean) => {
-            setShowUrlInput(open);
-            if (!open) setUrlInput("");
-          }}
-        >
-          <DialogTrigger asChild>
-            <Button variant="ghost" size="sm">
-              <Link className="size-3.5" />
-              Import
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Import from URL</DialogTitle>
-              <DialogDescription>
-                Paste a GitHub file URL, Gist, or raw markdown URL.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="flex flex-col gap-3">
-              <Input
-                value={urlInput}
-                onChange={(e) => setUrlInput(e.target.value)}
-                placeholder="https://github.com/user/repo/blob/main/README.md"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    fetchUrl();
-                  }
-                }}
-                autoFocus
-              />
-              <div className="flex justify-end gap-2">
-                <DialogClose asChild>
-                  <Button variant="ghost" size="sm">
-                    Cancel
+              <div className="flex items-center gap-1">
+                {toc.length >= 2 && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant={showToc ? "default" : "ghost"}
+                        size="xs"
+                        onClick={() => setShowToc(!showToc)}
+                      >
+                        <List className="size-3" />
+                        <span className="hidden sm:inline">TOC</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Table of Contents</TooltipContent>
+                  </Tooltip>
+                )}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={scrollSync ? "default" : "ghost"}
+                      size="xs"
+                      onClick={toggleScrollSync}
+                    >
+                      <ArrowUpDown className="size-3" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Scroll sync</TooltipContent>
+                </Tooltip>
+                {frontmatterData && (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => setShowFrontmatter(!showFrontmatter)}
+                  >
+                    Frontmatter {showFrontmatter ? "▾" : "▸"}
                   </Button>
-                </DialogClose>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={fetchUrl}
-                  disabled={urlLoading}
-                >
-                  {urlLoading ? "Loading..." : "Fetch"}
+                )}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="xs" onClick={copyHTML}>
+                      <Copy className="size-3" />
+                      <span className="hidden sm:inline">Copy HTML</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Copy HTML ({modKey}+Shift+C)</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="xs" onClick={downloadHTML}>
+                      <Download className="size-3" />
+                      <span className="hidden sm:inline">Download</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Download HTML ({modKey}+D)</TooltipContent>
+                </Tooltip>
+                <Button variant="ghost" size="xs" onClick={openPreview}>
+                  <ExternalLink className="size-3" />
+                  <span className="hidden sm:inline">Open Full Page</span>
                 </Button>
               </div>
             </div>
-          </DialogContent>
-        </Dialog>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            setShowThemeInput(!showThemeInput);
-            if (showThemeInput) setThemeUrl("");
-          }}
-        >
-          <Palette className="size-3.5" />
-          Theme
-        </Button>
-        {activeThemeName && (
-          <>
-            <span className="text-xs text-muted-foreground">
-              Active: {activeThemeName}
-            </span>
-            <Button variant="ghost" size="xs" onClick={resetTheme}>
-              <X className="size-3" />
-              Reset
-            </Button>
-          </>
-        )}
 
-        <div className="flex-1" />
+            {/* Frontmatter card */}
+            {frontmatterData && showFrontmatter && (
+              <div className="border-b bg-muted/30 px-4 py-3 no-print">
+                <div className="space-y-1.5">
+                  {frontmatterData.title && (
+                    <h2 className="text-base font-semibold">
+                      {String(frontmatterData.title)}
+                    </h2>
+                  )}
+                  {frontmatterData.author && (
+                    <p className="text-sm">{String(frontmatterData.author)}</p>
+                  )}
+                  {(frontmatterData.pubDate || frontmatterData.date) && (
+                    <p className="text-sm">
+                      {formatDate(
+                        frontmatterData.pubDate || frontmatterData.date,
+                      )}
+                    </p>
+                  )}
+                  {frontmatterData.description && (
+                    <p className="text-sm text-muted-foreground">
+                      {String(frontmatterData.description)}
+                    </p>
+                  )}
+                  {Array.isArray(frontmatterData.tags) && (
+                    <div className="flex flex-wrap gap-1">
+                      {(frontmatterData.tags as string[]).map((tag) => (
+                        <span
+                          key={tag}
+                          className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
-        <span className="text-xs text-muted-foreground">
-          Built by{" "}
-          <a
-            href="https://johnryancottam.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-foreground hover:underline"
+            {/* TOC */}
+            {showToc && toc.length >= 2 && (
+              <div className="border-b bg-muted/30 px-4 py-3 no-print">
+                <h3 className="mb-2 text-sm font-semibold">Table of Contents</h3>
+                <nav className="space-y-1">
+                  {toc.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => scrollToHeading(item.id)}
+                      className="block w-full text-left text-sm text-muted-foreground hover:text-foreground transition-colors"
+                      style={{ paddingLeft: `${(item.level - 1) * 12}px` }}
+                    >
+                      {item.text}
+                    </button>
+                  ))}
+                </nav>
+              </div>
+            )}
+
+            {/* HTML preview */}
+            <div
+              ref={previewRef}
+              className="markdown-preview min-h-0 flex-1 overflow-y-auto p-4"
+              dangerouslySetInnerHTML={{ __html: renderedHtml }}
+            />
+          </div>
+        </div>
+
+        {/* Footer toolbar */}
+        <footer className="flex flex-wrap items-center gap-2 border-t px-4 py-2 sm:px-6 no-print">
+          <Dialog
+            open={showUrlInput}
+            onOpenChange={(open: boolean) => {
+              setShowUrlInput(open);
+              if (!open) setUrlInput("");
+            }}
           >
-            John Ryan Cottam
-          </a>
-        </span>
-      </footer>
-
-      {/* Theme input */}
-      {showThemeInput && (
-        <div className="flex items-center gap-2 border-t bg-muted/30 px-4 py-2 sm:px-6">
-          <Button variant="outline" size="sm" asChild>
-            <a
-              href="https://tweakcn.com/editor/theme"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <ExternalLink className="size-3.5" />
-              Browse
-            </a>
-          </Button>
-          <Input
-            value={themeUrl}
-            onChange={(e) => setThemeUrl(e.target.value)}
-            placeholder="Paste theme JSON URL..."
-            onKeyDown={(e) => e.key === "Enter" && applyThemeFromUrl()}
-            className="flex-1"
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={applyThemeFromUrl}
-            disabled={themeLoading}
-          >
-            {themeLoading ? "Loading..." : "Apply"}
-          </Button>
-          <Button variant="ghost" size="sm" onClick={resetTheme}>
-            Reset
-          </Button>
+            <DialogTrigger asChild>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="sm">
+                    <Link className="size-3.5" />
+                    Import
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Import from URL ({modKey}+K)</TooltipContent>
+              </Tooltip>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Import from URL</DialogTitle>
+                <DialogDescription>
+                  Paste a GitHub file URL, Gist, or raw markdown URL.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex flex-col gap-3">
+                <Input
+                  value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)}
+                  placeholder="https://github.com/user/repo/blob/main/README.md"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      fetchUrl();
+                    }
+                  }}
+                  autoFocus
+                />
+                <div className="flex justify-end gap-2">
+                  <DialogClose asChild>
+                    <Button variant="ghost" size="sm">
+                      Cancel
+                    </Button>
+                  </DialogClose>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={fetchUrl}
+                    disabled={urlLoading}
+                  >
+                    {urlLoading ? "Loading..." : "Fetch"}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => {
-              setShowThemeInput(false);
-              setThemeUrl("");
+              setShowThemeInput(!showThemeInput);
+              if (showThemeInput) setThemeUrl("");
             }}
           >
-            <X className="size-3.5" />
+            <Palette className="size-3.5" />
+            Theme
           </Button>
-        </div>
-      )}
-
-      {/* Documents Sheet */}
-      <Sheet open={showDocSheet} onOpenChange={setShowDocSheet}>
-        <SheetContent side="left" className="flex flex-col">
-          <SheetHeader>
-            <div className="flex items-center justify-between">
-              <SheetTitle>Documents</SheetTitle>
-              <Button variant="outline" size="xs" onClick={createNewDocument}>
-                <Plus className="size-3" />
-                New
+          {activeThemeName && (
+            <>
+              <span className="text-xs text-muted-foreground">
+                Active: {activeThemeName}
+              </span>
+              <Button variant="ghost" size="xs" onClick={resetTheme}>
+                <X className="size-3" />
+                Reset
               </Button>
-            </div>
-            <SheetDescription>
-              {documents.length} document{documents.length !== 1 ? "s" : ""}{" "}
-              saved
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 overflow-y-auto -mx-2">
-            {documents.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-                <FileText className="size-8 text-muted-foreground/40" />
-                <p className="text-sm text-muted-foreground">
-                  No documents yet
-                </p>
-                <Button variant="outline" size="sm" onClick={createNewDocument}>
-                  <Plus className="size-3.5" />
-                  Create your first document
-                </Button>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-0.5 px-2">
-                {documents
-                  .sort((a, b) => b.updatedAt - a.updatedAt)
-                  .map((doc) => (
-                    <div
-                      key={doc.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => switchDocument(doc.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          switchDocument(doc.id);
-                        }
-                      }}
-                      className={`group flex cursor-pointer items-center justify-between rounded-md px-3 py-2.5 text-left transition-colors ${
-                        doc.id === activeDocId
-                          ? "bg-accent text-accent-foreground"
-                          : "hover:bg-muted"
-                      }`}
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">
-                          {doc.title}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {relativeTime(doc.updatedAt)}
-                        </p>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPendingDeleteId(doc.id);
-                        }}
-                      >
-                        <Trash2 className="size-3" />
-                      </Button>
-                    </div>
-                  ))}
-              </div>
-            )}
-          </div>
-        </SheetContent>
-      </Sheet>
-      <AlertDialog
-        open={pendingDeleteId !== null}
-        onOpenChange={(open: boolean) => {
-          if (!open) setPendingDeleteId(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete document?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This document will be permanently deleted from your browser
-              storage. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
+            </>
+          )}
+
+          <div className="flex-1" />
+
+          <span className="text-xs text-muted-foreground">
+            Built by{" "}
+            <a
+              href="https://johnryancottam.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-foreground hover:underline"
+            >
+              John Ryan Cottam
+            </a>
+          </span>
+        </footer>
+
+        {/* Theme input */}
+        {showThemeInput && (
+          <div className="flex items-center gap-2 border-t bg-muted/30 px-4 py-2 sm:px-6 no-print">
+            <Button variant="outline" size="sm" asChild>
+              <a
+                href="https://tweakcn.com/editor/theme"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <ExternalLink className="size-3.5" />
+                Browse
+              </a>
+            </Button>
+            <Input
+              value={themeUrl}
+              onChange={(e) => setThemeUrl(e.target.value)}
+              placeholder="Paste theme JSON URL..."
+              onKeyDown={(e) => e.key === "Enter" && applyThemeFromUrl()}
+              className="flex-1"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={applyThemeFromUrl}
+              disabled={themeLoading}
+            >
+              {themeLoading ? "Loading..." : "Apply"}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={resetTheme}>
+              Reset
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
-                if (pendingDeleteId) {
-                  deleteDocument(pendingDeleteId);
-                  setPendingDeleteId(null);
-                }
+                setShowThemeInput(false);
+                setThemeUrl("");
               }}
             >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+              <X className="size-3.5" />
+            </Button>
+          </div>
+        )}
+
+        {/* Documents Sheet */}
+        <Sheet open={showDocSheet} onOpenChange={setShowDocSheet}>
+          <SheetContent side="left" className="flex flex-col">
+            <SheetHeader>
+              <div className="flex items-center justify-between">
+                <SheetTitle>Documents</SheetTitle>
+                <Button variant="outline" size="xs" onClick={createNewDocument}>
+                  <Plus className="size-3" />
+                  New
+                </Button>
+              </div>
+              <SheetDescription>
+                {documents.length} document{documents.length !== 1 ? "s" : ""}{" "}
+                saved
+              </SheetDescription>
+            </SheetHeader>
+            <div className="flex-1 overflow-y-auto -mx-2">
+              {documents.length === 0 ? (
+                <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+                  <FileText className="size-8 text-muted-foreground/40" />
+                  <p className="text-sm text-muted-foreground">
+                    No documents yet
+                  </p>
+                  <Button variant="outline" size="sm" onClick={createNewDocument}>
+                    <Plus className="size-3.5" />
+                    Create your first document
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-0.5 px-2">
+                  {documents
+                    .sort((a, b) => b.updatedAt - a.updatedAt)
+                    .map((doc) => (
+                      <div
+                        key={doc.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => switchDocument(doc.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            switchDocument(doc.id);
+                          }
+                        }}
+                        className={`group flex cursor-pointer items-center justify-between rounded-md px-3 py-2.5 text-left transition-colors ${
+                          doc.id === activeDocId
+                            ? "bg-accent text-accent-foreground"
+                            : "hover:bg-muted"
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">
+                            {doc.title}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {relativeTime(doc.updatedAt)}
+                          </p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPendingDeleteId(doc.id);
+                          }}
+                        >
+                          <Trash2 className="size-3" />
+                        </Button>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
+
+        {/* Delete confirmation */}
+        <AlertDialog
+          open={pendingDeleteId !== null}
+          onOpenChange={(open: boolean) => {
+            if (!open) setPendingDeleteId(null);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete document?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This document will be permanently deleted from your browser
+                storage. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                onClick={() => {
+                  if (pendingDeleteId) {
+                    deleteDocument(pendingDeleteId);
+                    setPendingDeleteId(null);
+                  }
+                }}
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Keyboard shortcuts dialog */}
+        <Dialog open={showShortcuts} onOpenChange={setShowShortcuts}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Keyboard Shortcuts</DialogTitle>
+              <DialogDescription>
+                Speed up your workflow with these shortcuts
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-sm">
+                <span>Save to browser</span>
+                <kbd className="rounded bg-muted px-2 py-1 font-mono text-xs">
+                  {modKey}+S
+                </kbd>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span>Copy HTML</span>
+                <kbd className="rounded bg-muted px-2 py-1 font-mono text-xs">
+                  {modKey}+Shift+C
+                </kbd>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span>Toggle URL import</span>
+                <kbd className="rounded bg-muted px-2 py-1 font-mono text-xs">
+                  {modKey}+K
+                </kbd>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span>Download HTML</span>
+                <kbd className="rounded bg-muted px-2 py-1 font-mono text-xs">
+                  {modKey}+D
+                </kbd>
+              </div>
+            </div>
+            <DialogClose asChild>
+              <Button variant="outline" className="mt-2">
+                Close
+              </Button>
+            </DialogClose>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </TooltipProvider>
   );
 }
